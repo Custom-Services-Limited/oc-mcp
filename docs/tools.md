@@ -43,7 +43,7 @@ Catalog reads only return storefront-safe data and avoid disabled/future/unassig
 - `cart.estimate_totals`
 - `checkout.validate`
 
-Cart tools use dedicated MCP cart sessions. They do not create orders, capture payment, or mutate a browser customer session.
+Cart tools use dedicated MCP cart sessions. They do not create orders, capture payment, or mutate a browser customer session. Shipping and payment quote tools call repository checkout adapters when available; otherwise they return an explicit adapter-required response without side effects.
 
 ## Customer Self-Service
 
@@ -160,6 +160,12 @@ Inventory exact quantity, bulk adjustment, and movement-history tools execute th
 Order status, note, customer notification, return, tracking, and resend-request tools execute through scoped order status/history or return records. Payment capture, refund, void, and order item edits remain excluded.
 
 Coupon update and delete tools execute scoped coupon mutations with explicit reason, dry-run support, and date/type validation.
+
+Non-sensitive setting update tools execute allowlisted store/basic/SEO/localisation changes only. Payment, shipping, tax, mail, API, security, token, password, and secret-like keys are rejected server-side.
+Product create/update/special/discount/category/image/delete tools execute scoped product-table mutations for allowed catalog fields only.
+Category, manufacturer, information, and review moderation tools execute scoped catalog mutations with dry-run diffs and no generic SQL exposure.
+Customer export and delete are R5 advanced-only tools; export returns selected customer-owned records, delete removes customer-linked records without touching orders.
+Media search/get/upload/delete are constrained to image-library paths under `catalog/`; uploads require base64 image content, allowed MIME/extensions, and a 5MB size limit.
 
 ## Audit Operations
 

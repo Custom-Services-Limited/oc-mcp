@@ -73,6 +73,26 @@ class ToolExecutor {
             case 'admin.product.update_price': return $this->adminProductUpdatePrice($arguments);
             case 'admin.product.update_seo': return $this->adminProductUpdateSeo($arguments);
             case 'admin.product.update_description': return $this->adminProductUpdateDescription($arguments);
+            case 'admin.product.create': return $this->adminProductCreate($arguments);
+            case 'admin.product.update': return $this->adminProductUpdate($arguments);
+            case 'admin.product.update_specials': return $this->adminProductUpdateSpecials($arguments);
+            case 'admin.product.update_discounts': return $this->adminProductUpdateDiscounts($arguments);
+            case 'admin.product.assign_categories': return $this->adminProductAssignCategories($arguments);
+            case 'admin.product.update_images': return $this->adminProductUpdateImages($arguments);
+            case 'admin.product.attach_image': return $this->adminProductAttachImage($arguments);
+            case 'admin.product.delete': return $this->adminProductDelete($arguments);
+            case 'admin.category.create': return $this->categoryCreate($arguments);
+            case 'admin.category.update': return $this->categoryUpdate($arguments);
+            case 'admin.category.update_status': return $this->categoryUpdateStatus($arguments);
+            case 'admin.category.delete': return $this->categoryDelete($arguments);
+            case 'admin.manufacturer.create': return $this->manufacturerCreate($arguments);
+            case 'admin.manufacturer.update': return $this->manufacturerUpdate($arguments);
+            case 'admin.information.create': return $this->informationCreate($arguments);
+            case 'admin.information.update': return $this->informationUpdate($arguments);
+            case 'admin.information.delete': return $this->informationDelete($arguments);
+            case 'admin.review.approve': return $this->reviewApprove($arguments);
+            case 'admin.review.update': return $this->reviewUpdate($arguments);
+            case 'admin.review.delete': return $this->reviewDelete($arguments);
             case 'admin.inventory.get': return $this->inventoryGet($arguments);
             case 'admin.inventory.search_low_stock': return $this->inventoryLowStock($arguments);
             case 'admin.inventory.adjust': return $this->inventoryAdjust($arguments, $client, $requestId);
@@ -98,6 +118,8 @@ class ToolExecutor {
             case 'admin.customer.add_address': return $this->customerAddAddress($arguments);
             case 'admin.customer.update_address': return $this->customerUpdateAddress($arguments);
             case 'admin.customer.delete_address': return $this->customerDeleteAddress($arguments);
+            case 'admin.customer.delete': return $this->customerDelete($arguments);
+            case 'admin.customer.export': return $this->customerExport($arguments);
             case 'admin.coupon.search': return $this->couponSearch($arguments);
             case 'admin.coupon.get': return $this->couponGet($arguments);
             case 'admin.coupon.create': return $this->couponCreate($arguments);
@@ -108,6 +130,15 @@ class ToolExecutor {
             case 'admin.report.orders_by_status': return $this->reportOrdersByStatus($arguments);
             case 'admin.report.low_stock_value': return $this->reportLowStockValue($arguments);
             case 'admin.setting.get': return $this->settingGet($arguments);
+            case 'admin.setting.update':
+            case 'admin.setting.update_basic':
+            case 'admin.setting.update_seo':
+            case 'admin.setting.update_localisation':
+                return $this->settingUpdate($toolName, $arguments);
+            case 'admin.media.search': return $this->mediaSearch($arguments);
+            case 'admin.media.get': return $this->mediaGet($arguments);
+            case 'admin.media.upload': return $this->mediaUpload($arguments);
+            case 'admin.media.delete': return $this->mediaDelete($arguments);
             case 'diagnostic.status': return $this->diagnosticStatus();
             default:
                 return $this->supplementalPrdTool($toolName, $arguments, $client, $requestId);
@@ -155,10 +186,10 @@ class ToolExecutor {
             'tool' => $toolName,
             'dry_run' => !empty($args['dry_run']),
             'executed' => false,
-            'requires_dedicated_integration' => true,
+            'integration_missing' => true,
             'reason' => $args['reason'],
             'risk_tier' => $tool['risk_tier'],
-            'message' => 'This PRD tool is registered and permissioned, but live mutation requires a dedicated OpenCart model integration. No changes were made.',
+            'message' => 'Registered write tool is blocked because no explicit executor integration exists. No changes were made.',
         );
     }
 
@@ -458,6 +489,65 @@ class ToolExecutor {
         return array('information' => $row);
     }
 
+    private function reviewApprove($args) {
+        $review = $this->reviewRequired((int)$args['review_id']);
+        $result = $this->writeDiff('review', (int)$review['review_id'], array('status' => (int)$review['status']), array('status' => 1), $args);
+        $result['executed'] = false;
+        if (empty($args['dry_run'])) {
+            $this->repository->query("UPDATE `" . $this->prefix . "review` SET status = '1', date_modified = NOW() WHERE review_id = '" . (int)$review['review_id'] . "' LIMIT 1");
+            $result['review'] = $this->reviewRequired((int)$review['review_id']);
+            $result['executed'] = true;
+        }
+        return $result;
+    }
+
+    private function reviewUpdate($args) {
+        $review = $this->reviewRequired((int)$args['review_id']);
+        $fields = array();
+        foreach (array('author', 'text') as $field) {
+            if (array_key_exists($field, $args)) {
+                $fields[$field] = (string)$args[$field];
+            }
+        }
+        foreach (array('rating', 'status') as $field) {
+            if (array_key_exists($field, $args)) {
+                $fields[$field] = (int)$args[$field];
+            }
+        }
+        if (!$fields) {
+            throw new McpException('INVALID_INPUT', 'At least one allowed review field is required.');
+        }
+        if (isset($fields['rating']) && ($fields['rating'] < 1 || $fields['rating'] > 5)) {
+            throw new McpException('INVALID_INPUT', 'Review rating must be between 1 and 5.');
+        }
+        $after = array_merge($review, $fields);
+        $result = $this->writeDiff('review', (int)$review['review_id'], $review, $after, $args);
+        $result['executed'] = false;
+        if (empty($args['dry_run'])) {
+            $sets = array();
+            foreach ($fields as $field => $value) {
+                $sets[] = "`" . $field . "` = '" . $this->escape($value) . "'";
+            }
+            $this->repository->query("UPDATE `" . $this->prefix . "review` SET " . implode(', ', $sets) . ", date_modified = NOW() WHERE review_id = '" . (int)$review['review_id'] . "' LIMIT 1");
+            $result['review'] = $this->reviewRequired((int)$review['review_id']);
+            $result['executed'] = true;
+        }
+        return $result;
+    }
+
+    private function reviewDelete($args) {
+        $review = $this->reviewRequired((int)$args['review_id']);
+        $result = $this->writeDiff('review', (int)$review['review_id'], $review, array('deleted' => true), $args);
+        $result['executed'] = false;
+        $result['deleted'] = false;
+        if (empty($args['dry_run'])) {
+            $this->repository->query("DELETE FROM `" . $this->prefix . "review` WHERE review_id = '" . (int)$review['review_id'] . "' LIMIT 1");
+            $result['executed'] = true;
+            $result['deleted'] = true;
+        }
+        return $result;
+    }
+
     private function filterOptions($args) {
         $languageId = (int)($args['language_id'] ?? $this->repository->config('config_language_id', 1));
         $limit = $this->limit($args['limit'] ?? 100);
@@ -591,11 +681,19 @@ class ToolExecutor {
 
     private function cartQuoteShipping($args, $client) {
         $cart = $this->loadCart($args['cart_id'], $client);
+        if (method_exists($this->repository, 'quoteShipping')) {
+            $quote = $this->repository->quoteShipping($cart, $args);
+            $quote['cart_id'] = $cart['cart_id'];
+            $quote['order_created'] = false;
+            $quote['payment_captured'] = false;
+            return $quote;
+        }
         return array(
             'cart_id' => $cart['cart_id'],
             'available' => false,
+            'adapter_required' => true,
             'quotes' => array(),
-            'messages' => array('Live OpenCart shipping quote adapters are not available through this MCP endpoint yet.'),
+            'messages' => array('No portable OpenCart shipping quote adapter is configured for this installation.'),
             'order_created' => false,
             'payment_captured' => false,
         );
@@ -611,11 +709,19 @@ class ToolExecutor {
 
     private function cartQuotePayment($args, $client) {
         $cart = $this->loadCart($args['cart_id'], $client);
+        if (method_exists($this->repository, 'quotePayment')) {
+            $quote = $this->repository->quotePayment($cart, $args);
+            $quote['cart_id'] = $cart['cart_id'];
+            $quote['order_created'] = false;
+            $quote['payment_captured'] = false;
+            return $quote;
+        }
         return array(
             'cart_id' => $cart['cart_id'],
             'available' => false,
+            'adapter_required' => true,
             'methods' => array(),
-            'messages' => array('Live OpenCart payment method adapters are not available through this MCP endpoint yet.'),
+            'messages' => array('No portable OpenCart payment quote adapter is configured for this installation.'),
             'order_created' => false,
             'payment_captured' => false,
         );
@@ -999,6 +1105,441 @@ class ToolExecutor {
                 description = '" . $this->escape($after['description']) . "'
                 WHERE product_id = '" . (int)$args['product_id'] . "'
                 AND language_id = '" . (int)$args['language_id'] . "'");
+        }
+        return $result;
+    }
+
+    private function adminProductCreate($args) {
+        $languageId = (int)($args['language_id'] ?? $this->repository->config('config_language_id', 1));
+        $storeId = (int)($args['store_id'] ?? 0);
+        $name = trim((string)($args['name'] ?? ''));
+        $model = trim((string)($args['model'] ?? ''));
+        if ($name === '' || $model === '') {
+            throw new McpException('INVALID_INPUT', 'Product create requires name and model.');
+        }
+        $product = array(
+            'model' => $model,
+            'sku' => (string)($args['sku'] ?? ''),
+            'quantity' => (int)($args['quantity'] ?? 0),
+            'price' => (float)($args['price'] ?? 0),
+            'image' => !empty($args['image']) ? $this->normalizeMediaPath($args['image']) : '',
+            'stock_status_id' => (int)($args['stock_status_id'] ?? 0),
+            'manufacturer_id' => (int)($args['manufacturer_id'] ?? 0),
+            'subtract' => (int)($args['subtract'] ?? 1),
+            'status' => (int)($args['status'] ?? 0),
+            'date_available' => (string)($args['date_available'] ?? date('Y-m-d')),
+        );
+        $description = array(
+            'language_id' => $languageId,
+            'name' => $name,
+            'description' => (string)($args['description'] ?? ''),
+            'meta_title' => (string)($args['meta_title'] ?? $name),
+            'meta_description' => (string)($args['meta_description'] ?? ''),
+            'meta_keyword' => (string)($args['meta_keyword'] ?? ''),
+            'tag' => (string)($args['tag'] ?? ''),
+        );
+        $result = $this->writeDiff('product', 'new', array(), array_merge($product, $description), $args);
+        $result['executed'] = false;
+        if (empty($args['dry_run'])) {
+            $this->repository->query("INSERT INTO `" . $this->prefix . "product` SET model = '" . $this->escape($product['model']) . "', sku = '" . $this->escape($product['sku']) . "', quantity = '" . (int)$product['quantity'] . "', stock_status_id = '" . (int)$product['stock_status_id'] . "', image = '" . $this->escape($product['image']) . "', manufacturer_id = '" . (int)$product['manufacturer_id'] . "', price = '" . (float)$product['price'] . "', subtract = '" . (int)$product['subtract'] . "', status = '" . (int)$product['status'] . "', date_available = '" . $this->escape($product['date_available']) . "', date_added = NOW(), date_modified = NOW()");
+            $productId = (int)$this->repository->lastId();
+            $this->repository->query("INSERT INTO `" . $this->prefix . "product_description` SET product_id = '" . $productId . "', language_id = '" . $languageId . "', name = '" . $this->escape($description['name']) . "', description = '" . $this->escape($description['description']) . "', tag = '" . $this->escape($description['tag']) . "', meta_title = '" . $this->escape($description['meta_title']) . "', meta_description = '" . $this->escape($description['meta_description']) . "', meta_keyword = '" . $this->escape($description['meta_keyword']) . "'");
+            $this->repository->query("INSERT INTO `" . $this->prefix . "product_to_store` SET product_id = '" . $productId . "', store_id = '" . $storeId . "'");
+            $result['entity_id'] = (string)$productId;
+            $result['product_id'] = $productId;
+            $result['product'] = array_merge(array('product_id' => $productId), $product, $description);
+            $result['executed'] = true;
+        }
+        return $result;
+    }
+
+    private function adminProductUpdate($args) {
+        $product = $this->productRequired((int)$args['product_id']);
+        $productFields = array();
+        foreach (array('model', 'sku') as $field) {
+            if (array_key_exists($field, $args)) $productFields[$field] = (string)$args[$field];
+        }
+        if (array_key_exists('image', $args)) $productFields['image'] = $args['image'] === '' ? '' : $this->normalizeMediaPath($args['image']);
+        foreach (array('quantity', 'stock_status_id', 'manufacturer_id', 'subtract', 'status') as $field) {
+            if (array_key_exists($field, $args)) $productFields[$field] = (int)$args[$field];
+        }
+        if (array_key_exists('price', $args)) $productFields['price'] = (float)$args['price'];
+        $descriptionFields = array();
+        foreach (array('name', 'description', 'meta_title', 'meta_description', 'meta_keyword', 'tag') as $field) {
+            if (array_key_exists($field, $args)) $descriptionFields[$field] = (string)$args[$field];
+        }
+        if (!$productFields && !$descriptionFields) {
+            throw new McpException('INVALID_INPUT', 'Product update requires at least one allowed field.');
+        }
+        $before = $product;
+        $after = array_merge($product, $productFields);
+        if ($descriptionFields) {
+            $languageId = (int)($args['language_id'] ?? $this->repository->config('config_language_id', 1));
+            $description = $this->productDescriptionRequired((int)$args['product_id'], $languageId);
+            $before['description_fields'] = $description;
+            $after['description_fields'] = array_merge($description, $descriptionFields);
+        }
+        $result = $this->writeDiff('product', (int)$args['product_id'], $before, $after, $args);
+        $result['executed'] = false;
+        if (empty($args['dry_run'])) {
+            if ($productFields) {
+                $sets = array();
+                foreach ($productFields as $field => $value) {
+                    $sets[] = "`" . $this->escapeIdentifier($field) . "` = '" . $this->escape($value) . "'";
+                }
+                $this->repository->query("UPDATE `" . $this->prefix . "product` SET " . implode(', ', $sets) . ", date_modified = NOW() WHERE product_id = '" . (int)$args['product_id'] . "'");
+            }
+            if ($descriptionFields) {
+                $sets = array();
+                foreach ($descriptionFields as $field => $value) {
+                    $sets[] = "`" . $this->escapeIdentifier($field) . "` = '" . $this->escape($value) . "'";
+                }
+                $this->repository->query("UPDATE `" . $this->prefix . "product_description` SET " . implode(', ', $sets) . " WHERE product_id = '" . (int)$args['product_id'] . "' AND language_id = '" . $languageId . "'");
+            }
+            $result['product'] = $this->productRequired((int)$args['product_id']);
+            $result['executed'] = true;
+        }
+        return $result;
+    }
+
+    private function adminProductUpdateSpecials($args) {
+        $product = $this->productRequired((int)$args['product_id']);
+        $items = isset($args['specials']) && is_array($args['specials']) ? $args['specials'] : array($args);
+        $specials = array();
+        foreach ($items as $item) {
+            if (!isset($item['price'])) throw new McpException('INVALID_INPUT', 'Product special requires price.');
+            $specials[] = array(
+                'customer_group_id' => (int)($item['customer_group_id'] ?? 1),
+                'priority' => (int)($item['priority'] ?? 0),
+                'price' => (float)$item['price'],
+                'date_start' => (string)($item['date_start'] ?? '0000-00-00'),
+                'date_end' => (string)($item['date_end'] ?? '0000-00-00'),
+            );
+        }
+        $result = $this->writeDiff('product_special', (int)$product['product_id'], array('replace' => true), array('specials' => $specials), $args);
+        $result['executed'] = false;
+        if (empty($args['dry_run'])) {
+            $this->repository->query("DELETE FROM `" . $this->prefix . "product_special` WHERE product_id = '" . (int)$product['product_id'] . "'");
+            foreach ($specials as $special) {
+                $this->repository->query("INSERT INTO `" . $this->prefix . "product_special` SET product_id = '" . (int)$product['product_id'] . "', customer_group_id = '" . (int)$special['customer_group_id'] . "', priority = '" . (int)$special['priority'] . "', price = '" . (float)$special['price'] . "', date_start = '" . $this->escape($special['date_start']) . "', date_end = '" . $this->escape($special['date_end']) . "'");
+            }
+            $result['executed'] = true;
+        }
+        $result['specials'] = $specials;
+        return $result;
+    }
+
+    private function adminProductUpdateDiscounts($args) {
+        $product = $this->productRequired((int)$args['product_id']);
+        $items = isset($args['discounts']) && is_array($args['discounts']) ? $args['discounts'] : array($args);
+        $discounts = array();
+        foreach ($items as $item) {
+            if (!isset($item['price'])) throw new McpException('INVALID_INPUT', 'Product discount requires price.');
+            $discounts[] = array(
+                'customer_group_id' => (int)($item['customer_group_id'] ?? 1),
+                'quantity' => (int)($item['quantity'] ?? 1),
+                'priority' => (int)($item['priority'] ?? 0),
+                'price' => (float)$item['price'],
+                'date_start' => (string)($item['date_start'] ?? '0000-00-00'),
+                'date_end' => (string)($item['date_end'] ?? '0000-00-00'),
+            );
+        }
+        $result = $this->writeDiff('product_discount', (int)$product['product_id'], array('replace' => true), array('discounts' => $discounts), $args);
+        $result['executed'] = false;
+        if (empty($args['dry_run'])) {
+            $this->repository->query("DELETE FROM `" . $this->prefix . "product_discount` WHERE product_id = '" . (int)$product['product_id'] . "'");
+            foreach ($discounts as $discount) {
+                $this->repository->query("INSERT INTO `" . $this->prefix . "product_discount` SET product_id = '" . (int)$product['product_id'] . "', customer_group_id = '" . (int)$discount['customer_group_id'] . "', quantity = '" . (int)$discount['quantity'] . "', priority = '" . (int)$discount['priority'] . "', price = '" . (float)$discount['price'] . "', date_start = '" . $this->escape($discount['date_start']) . "', date_end = '" . $this->escape($discount['date_end']) . "'");
+            }
+            $result['executed'] = true;
+        }
+        $result['discounts'] = $discounts;
+        return $result;
+    }
+
+    private function adminProductAssignCategories($args) {
+        $product = $this->productRequired((int)$args['product_id']);
+        $categoryIds = isset($args['category_ids']) && is_array($args['category_ids']) ? $args['category_ids'] : array();
+        $categoryIds = array_values(array_unique(array_map('intval', $categoryIds)));
+        if (!$categoryIds) throw new McpException('INVALID_INPUT', 'Product category assignment requires category_ids.');
+        $result = $this->writeDiff('product_to_category', (int)$product['product_id'], array(), array('category_ids' => $categoryIds), $args);
+        $result['executed'] = false;
+        if (empty($args['dry_run'])) {
+            $this->repository->query("DELETE FROM `" . $this->prefix . "product_to_category` WHERE product_id = '" . (int)$product['product_id'] . "'");
+            foreach ($categoryIds as $categoryId) {
+                $this->repository->query("INSERT INTO `" . $this->prefix . "product_to_category` SET product_id = '" . (int)$product['product_id'] . "', category_id = '" . (int)$categoryId . "'");
+            }
+            $result['executed'] = true;
+        }
+        $result['category_ids'] = $categoryIds;
+        return $result;
+    }
+
+    private function adminProductUpdateImages($args) {
+        $product = $this->productRequired((int)$args['product_id']);
+        $items = isset($args['images']) && is_array($args['images']) ? $args['images'] : array();
+        if (!$items) throw new McpException('INVALID_INPUT', 'Product image update requires images.');
+        $images = array();
+        foreach ($items as $index => $item) {
+            $path = is_array($item) ? ($item['image'] ?? '') : $item;
+            $images[] = array('image' => $this->normalizeMediaPath($path), 'sort_order' => is_array($item) ? (int)($item['sort_order'] ?? $index) : $index);
+        }
+        $primary = !empty($args['primary_image']) ? $this->normalizeMediaPath($args['primary_image']) : $images[0]['image'];
+        $result = $this->writeDiff('product_image', (int)$product['product_id'], array('image' => $product['image']), array('primary_image' => $primary, 'images' => $images), $args);
+        $result['executed'] = false;
+        if (empty($args['dry_run'])) {
+            $this->repository->query("DELETE FROM `" . $this->prefix . "product_image` WHERE product_id = '" . (int)$product['product_id'] . "'");
+            $this->repository->query("UPDATE `" . $this->prefix . "product` SET image = '" . $this->escape($primary) . "', date_modified = NOW() WHERE product_id = '" . (int)$product['product_id'] . "'");
+            foreach ($images as $image) {
+                $this->repository->query("INSERT INTO `" . $this->prefix . "product_image` SET product_id = '" . (int)$product['product_id'] . "', image = '" . $this->escape($image['image']) . "', sort_order = '" . (int)$image['sort_order'] . "'");
+            }
+            $result['executed'] = true;
+        }
+        $result['primary_image'] = $primary;
+        $result['images'] = $images;
+        return $result;
+    }
+
+    private function adminProductAttachImage($args) {
+        $product = $this->productRequired((int)$args['product_id']);
+        $image = $this->normalizeMediaPath($args['image'] ?? '');
+        $sortOrder = (int)($args['sort_order'] ?? 0);
+        $primary = !empty($args['primary']);
+        $result = $this->writeDiff('product_image', (int)$product['product_id'], array('image' => $product['image']), array('image' => $image, 'primary' => $primary), $args);
+        $result['executed'] = false;
+        if (empty($args['dry_run'])) {
+            $this->repository->query("INSERT INTO `" . $this->prefix . "product_image` SET product_id = '" . (int)$product['product_id'] . "', image = '" . $this->escape($image) . "', sort_order = '" . $sortOrder . "'");
+            if ($primary) {
+                $this->repository->query("UPDATE `" . $this->prefix . "product` SET image = '" . $this->escape($image) . "', date_modified = NOW() WHERE product_id = '" . (int)$product['product_id'] . "'");
+            }
+            $result['executed'] = true;
+        }
+        $result['image'] = $image;
+        return $result;
+    }
+
+    private function adminProductDelete($args) {
+        $product = $this->productRequired((int)$args['product_id']);
+        $result = $this->writeDiff('product', (int)$product['product_id'], $product, array('deleted' => true), $args);
+        $result['executed'] = false;
+        $result['deleted'] = false;
+        if (empty($args['dry_run'])) {
+            foreach (array('product_description', 'product_to_store', 'product_to_category', 'product_special', 'product_discount', 'product_image', 'product_related') as $table) {
+                $this->repository->query("DELETE FROM `" . $this->prefix . $table . "` WHERE product_id = '" . (int)$product['product_id'] . "'");
+            }
+            $this->repository->query("DELETE FROM `" . $this->prefix . "product` WHERE product_id = '" . (int)$product['product_id'] . "' LIMIT 1");
+            $result['executed'] = true;
+            $result['deleted'] = true;
+        }
+        return $result;
+    }
+
+    private function categoryCreate($args) {
+        $languageId = (int)($args['language_id'] ?? $this->repository->config('config_language_id', 1));
+        $storeId = (int)($args['store_id'] ?? 0);
+        $name = trim((string)($args['name'] ?? ''));
+        if ($name === '') throw new McpException('INVALID_INPUT', 'Category create requires name.');
+        $after = array(
+            'parent_id' => (int)($args['parent_id'] ?? 0),
+            'sort_order' => (int)($args['sort_order'] ?? 0),
+            'status' => (int)($args['status'] ?? 0),
+            'image' => !empty($args['image']) ? $this->normalizeMediaPath($args['image']) : '',
+            'language_id' => $languageId,
+            'name' => $name,
+            'description' => (string)($args['description'] ?? ''),
+            'meta_title' => (string)($args['meta_title'] ?? $name),
+            'meta_description' => (string)($args['meta_description'] ?? ''),
+            'meta_keyword' => (string)($args['meta_keyword'] ?? ''),
+        );
+        $result = $this->writeDiff('category', 'new', array(), $after, $args);
+        $result['executed'] = false;
+        if (empty($args['dry_run'])) {
+            $this->repository->query("INSERT INTO `" . $this->prefix . "category` SET parent_id = '" . (int)$after['parent_id'] . "', sort_order = '" . (int)$after['sort_order'] . "', status = '" . (int)$after['status'] . "', image = '" . $this->escape($after['image']) . "', date_added = NOW(), date_modified = NOW()");
+            $categoryId = (int)$this->repository->lastId();
+            $this->repository->query("INSERT INTO `" . $this->prefix . "category_description` SET category_id = '" . $categoryId . "', language_id = '" . $languageId . "', name = '" . $this->escape($after['name']) . "', description = '" . $this->escape($after['description']) . "', meta_title = '" . $this->escape($after['meta_title']) . "', meta_description = '" . $this->escape($after['meta_description']) . "', meta_keyword = '" . $this->escape($after['meta_keyword']) . "'");
+            $this->repository->query("INSERT INTO `" . $this->prefix . "category_to_store` SET category_id = '" . $categoryId . "', store_id = '" . $storeId . "'");
+            $result['entity_id'] = (string)$categoryId;
+            $result['category_id'] = $categoryId;
+            $result['executed'] = true;
+        }
+        return $result;
+    }
+
+    private function categoryUpdate($args) {
+        $category = $this->categoryRequired((int)$args['category_id']);
+        $fields = array();
+        foreach (array('parent_id', 'sort_order', 'status') as $field) {
+            if (array_key_exists($field, $args)) $fields[$field] = (int)$args[$field];
+        }
+        if (array_key_exists('image', $args)) $fields['image'] = $args['image'] === '' ? '' : $this->normalizeMediaPath($args['image']);
+        $descriptionFields = array();
+        foreach (array('name', 'description', 'meta_title', 'meta_description', 'meta_keyword') as $field) {
+            if (array_key_exists($field, $args)) $descriptionFields[$field] = (string)$args[$field];
+        }
+        if (!$fields && !$descriptionFields) throw new McpException('INVALID_INPUT', 'Category update requires at least one allowed field.');
+        $before = $category;
+        $after = array_merge($category, $fields);
+        if ($descriptionFields) {
+            $languageId = (int)($args['language_id'] ?? $this->repository->config('config_language_id', 1));
+            $description = $this->categoryDescriptionRequired((int)$args['category_id'], $languageId);
+            $before['description_fields'] = $description;
+            $after['description_fields'] = array_merge($description, $descriptionFields);
+        }
+        $result = $this->writeDiff('category', (int)$args['category_id'], $before, $after, $args);
+        $result['executed'] = false;
+        if (empty($args['dry_run'])) {
+            if ($fields) {
+                $sets = array();
+                foreach ($fields as $field => $value) $sets[] = "`" . $this->escapeIdentifier($field) . "` = '" . $this->escape($value) . "'";
+                $this->repository->query("UPDATE `" . $this->prefix . "category` SET " . implode(', ', $sets) . ", date_modified = NOW() WHERE category_id = '" . (int)$args['category_id'] . "'");
+            }
+            if ($descriptionFields) {
+                $sets = array();
+                foreach ($descriptionFields as $field => $value) $sets[] = "`" . $this->escapeIdentifier($field) . "` = '" . $this->escape($value) . "'";
+                $this->repository->query("UPDATE `" . $this->prefix . "category_description` SET " . implode(', ', $sets) . " WHERE category_id = '" . (int)$args['category_id'] . "' AND language_id = '" . $languageId . "'");
+            }
+            $result['category'] = $this->categoryRequired((int)$args['category_id']);
+            $result['executed'] = true;
+        }
+        return $result;
+    }
+
+    private function categoryUpdateStatus($args) {
+        $args['status'] = (int)$args['status'];
+        return $this->categoryUpdate($args);
+    }
+
+    private function categoryDelete($args) {
+        $category = $this->categoryRequired((int)$args['category_id']);
+        $result = $this->writeDiff('category', (int)$category['category_id'], $category, array('deleted' => true), $args);
+        $result['executed'] = false;
+        $result['deleted'] = false;
+        if (empty($args['dry_run'])) {
+            foreach (array('category_description', 'category_to_store', 'category_path') as $table) {
+                $this->repository->query("DELETE FROM `" . $this->prefix . $table . "` WHERE category_id = '" . (int)$category['category_id'] . "'");
+            }
+            $this->repository->query("DELETE FROM `" . $this->prefix . "category` WHERE category_id = '" . (int)$category['category_id'] . "' LIMIT 1");
+            $result['executed'] = true;
+            $result['deleted'] = true;
+        }
+        return $result;
+    }
+
+    private function manufacturerCreate($args) {
+        $name = trim((string)($args['name'] ?? ''));
+        if ($name === '') throw new McpException('INVALID_INPUT', 'Manufacturer create requires name.');
+        $after = array('name' => $name, 'image' => !empty($args['image']) ? $this->normalizeMediaPath($args['image']) : '', 'sort_order' => (int)($args['sort_order'] ?? 0));
+        $result = $this->writeDiff('manufacturer', 'new', array(), $after, $args);
+        $result['executed'] = false;
+        if (empty($args['dry_run'])) {
+            $this->repository->query("INSERT INTO `" . $this->prefix . "manufacturer` SET name = '" . $this->escape($after['name']) . "', image = '" . $this->escape($after['image']) . "', sort_order = '" . (int)$after['sort_order'] . "'");
+            $manufacturerId = (int)$this->repository->lastId();
+            $this->repository->query("INSERT INTO `" . $this->prefix . "manufacturer_to_store` SET manufacturer_id = '" . $manufacturerId . "', store_id = '" . (int)($args['store_id'] ?? 0) . "'");
+            $result['entity_id'] = (string)$manufacturerId;
+            $result['manufacturer_id'] = $manufacturerId;
+            $result['executed'] = true;
+        }
+        return $result;
+    }
+
+    private function manufacturerUpdate($args) {
+        $manufacturer = $this->manufacturerRequired((int)$args['manufacturer_id']);
+        $fields = array();
+        if (array_key_exists('name', $args)) $fields['name'] = (string)$args['name'];
+        if (array_key_exists('image', $args)) $fields['image'] = $args['image'] === '' ? '' : $this->normalizeMediaPath($args['image']);
+        if (array_key_exists('sort_order', $args)) $fields['sort_order'] = (int)$args['sort_order'];
+        if (!$fields) throw new McpException('INVALID_INPUT', 'Manufacturer update requires at least one allowed field.');
+        $result = $this->writeDiff('manufacturer', (int)$args['manufacturer_id'], $manufacturer, array_merge($manufacturer, $fields), $args);
+        $result['executed'] = false;
+        if (empty($args['dry_run'])) {
+            $sets = array();
+            foreach ($fields as $field => $value) $sets[] = "`" . $this->escapeIdentifier($field) . "` = '" . $this->escape($value) . "'";
+            $this->repository->query("UPDATE `" . $this->prefix . "manufacturer` SET " . implode(', ', $sets) . " WHERE manufacturer_id = '" . (int)$args['manufacturer_id'] . "'");
+            $result['manufacturer'] = $this->manufacturerRequired((int)$args['manufacturer_id']);
+            $result['executed'] = true;
+        }
+        return $result;
+    }
+
+    private function informationCreate($args) {
+        $languageId = (int)($args['language_id'] ?? $this->repository->config('config_language_id', 1));
+        $title = trim((string)($args['title'] ?? ''));
+        if ($title === '') throw new McpException('INVALID_INPUT', 'Information create requires title.');
+        $after = array(
+            'bottom' => (int)($args['bottom'] ?? 0),
+            'sort_order' => (int)($args['sort_order'] ?? 0),
+            'status' => (int)($args['status'] ?? 0),
+            'language_id' => $languageId,
+            'title' => $title,
+            'description' => (string)($args['description'] ?? ''),
+            'meta_title' => (string)($args['meta_title'] ?? $title),
+            'meta_description' => (string)($args['meta_description'] ?? ''),
+            'meta_keyword' => (string)($args['meta_keyword'] ?? ''),
+        );
+        $result = $this->writeDiff('information', 'new', array(), $after, $args);
+        $result['executed'] = false;
+        if (empty($args['dry_run'])) {
+            $this->repository->query("INSERT INTO `" . $this->prefix . "information` SET bottom = '" . (int)$after['bottom'] . "', sort_order = '" . (int)$after['sort_order'] . "', status = '" . (int)$after['status'] . "'");
+            $informationId = (int)$this->repository->lastId();
+            $this->repository->query("INSERT INTO `" . $this->prefix . "information_description` SET information_id = '" . $informationId . "', language_id = '" . $languageId . "', title = '" . $this->escape($after['title']) . "', description = '" . $this->escape($after['description']) . "', meta_title = '" . $this->escape($after['meta_title']) . "', meta_description = '" . $this->escape($after['meta_description']) . "', meta_keyword = '" . $this->escape($after['meta_keyword']) . "'");
+            $this->repository->query("INSERT INTO `" . $this->prefix . "information_to_store` SET information_id = '" . $informationId . "', store_id = '" . (int)($args['store_id'] ?? 0) . "'");
+            $result['entity_id'] = (string)$informationId;
+            $result['information_id'] = $informationId;
+            $result['executed'] = true;
+        }
+        return $result;
+    }
+
+    private function informationUpdate($args) {
+        $information = $this->informationRequired((int)$args['information_id']);
+        $fields = array();
+        foreach (array('bottom', 'sort_order', 'status') as $field) {
+            if (array_key_exists($field, $args)) $fields[$field] = (int)$args[$field];
+        }
+        $descriptionFields = array();
+        foreach (array('title', 'description', 'meta_title', 'meta_description', 'meta_keyword') as $field) {
+            if (array_key_exists($field, $args)) $descriptionFields[$field] = (string)$args[$field];
+        }
+        if (!$fields && !$descriptionFields) throw new McpException('INVALID_INPUT', 'Information update requires at least one allowed field.');
+        $before = $information;
+        $after = array_merge($information, $fields);
+        if ($descriptionFields) {
+            $languageId = (int)($args['language_id'] ?? $this->repository->config('config_language_id', 1));
+            $description = $this->informationDescriptionRequired((int)$args['information_id'], $languageId);
+            $before['description_fields'] = $description;
+            $after['description_fields'] = array_merge($description, $descriptionFields);
+        }
+        $result = $this->writeDiff('information', (int)$args['information_id'], $before, $after, $args);
+        $result['executed'] = false;
+        if (empty($args['dry_run'])) {
+            if ($fields) {
+                $sets = array();
+                foreach ($fields as $field => $value) $sets[] = "`" . $this->escapeIdentifier($field) . "` = '" . $this->escape($value) . "'";
+                $this->repository->query("UPDATE `" . $this->prefix . "information` SET " . implode(', ', $sets) . " WHERE information_id = '" . (int)$args['information_id'] . "'");
+            }
+            if ($descriptionFields) {
+                $sets = array();
+                foreach ($descriptionFields as $field => $value) $sets[] = "`" . $this->escapeIdentifier($field) . "` = '" . $this->escape($value) . "'";
+                $this->repository->query("UPDATE `" . $this->prefix . "information_description` SET " . implode(', ', $sets) . " WHERE information_id = '" . (int)$args['information_id'] . "' AND language_id = '" . $languageId . "'");
+            }
+            $result['information'] = $this->informationRequired((int)$args['information_id']);
+            $result['executed'] = true;
+        }
+        return $result;
+    }
+
+    private function informationDelete($args) {
+        $information = $this->informationRequired((int)$args['information_id']);
+        $result = $this->writeDiff('information', (int)$information['information_id'], $information, array('deleted' => true), $args);
+        $result['executed'] = false;
+        $result['deleted'] = false;
+        if (empty($args['dry_run'])) {
+            foreach (array('information_description', 'information_to_store') as $table) {
+                $this->repository->query("DELETE FROM `" . $this->prefix . $table . "` WHERE information_id = '" . (int)$information['information_id'] . "'");
+            }
+            $this->repository->query("DELETE FROM `" . $this->prefix . "information` WHERE information_id = '" . (int)$information['information_id'] . "' LIMIT 1");
+            $result['executed'] = true;
+            $result['deleted'] = true;
         }
         return $result;
     }
@@ -1496,6 +2037,38 @@ class ToolExecutor {
         return $result;
     }
 
+    private function customerDelete($args) {
+        $customer = $this->customerRequired((int)$args['customer_id']);
+        $result = $this->writeDiff('customer', (int)$customer['customer_id'], $customer, array('deleted' => true), $args);
+        $result['executed'] = false;
+        $result['deleted'] = false;
+        if (empty($args['dry_run'])) {
+            foreach (array('address', 'customer_activity', 'customer_approval', 'customer_history', 'customer_ip', 'customer_login', 'customer_reward', 'customer_transaction', 'customer_wishlist') as $table) {
+                $this->repository->query("DELETE FROM `" . $this->prefix . $table . "` WHERE customer_id = '" . (int)$customer['customer_id'] . "'");
+            }
+            $this->repository->query("DELETE FROM `" . $this->prefix . "customer` WHERE customer_id = '" . (int)$customer['customer_id'] . "' LIMIT 1");
+            $result['executed'] = true;
+            $result['deleted'] = true;
+        }
+        return $result;
+    }
+
+    private function customerExport($args) {
+        $customer = $this->customerRequired((int)$args['customer_id']);
+        $addresses = $this->repository->query("SELECT * FROM `" . $this->prefix . "address` WHERE customer_id = '" . (int)$customer['customer_id'] . "'")->rows;
+        $orders = $this->repository->query("SELECT order_id, store_id, total, currency_code, order_status_id, date_added FROM `" . $this->prefix . "order` WHERE customer_id = '" . (int)$customer['customer_id'] . "' ORDER BY order_id DESC LIMIT 100")->rows;
+        return array(
+            'entity_type' => 'customer',
+            'entity_id' => (string)$customer['customer_id'],
+            'reason' => $args['reason'] ?? '',
+            'executed' => true,
+            'exported' => true,
+            'customer' => $customer,
+            'addresses' => $addresses,
+            'orders' => $orders,
+        );
+    }
+
     private function couponSearch($args) {
         $limit = $this->limit($args['limit'] ?? 25);
         $where = array("1 = 1");
@@ -1679,6 +2252,125 @@ class ToolExecutor {
         return array('settings' => $safe);
     }
 
+    private function settingUpdate($toolName, $args) {
+        $settings = isset($args['settings']) && is_array($args['settings']) ? $args['settings'] : array();
+        if (!$settings) {
+            throw new McpException('INVALID_INPUT', 'Settings update requires settings object.');
+        }
+        if (count($settings) > 25) {
+            throw new McpException('INVALID_INPUT', 'Settings update is limited to 25 keys.');
+        }
+
+        $storeId = (int)($args['store_id'] ?? 0);
+        $before = array();
+        $after = array();
+        foreach ($settings as $key => $value) {
+            $key = (string)$key;
+            if ($this->isSensitiveSettingKey($key) || $this->isBlockedSettingWrite($key)) {
+                throw new McpException('INVALID_INPUT', 'Setting key is not allowed for MCP writes: ' . $key);
+            }
+            if (!$this->settingKeyAllowedForTool($toolName, $key)) {
+                throw new McpException('INVALID_INPUT', 'Setting key is not allowed for this setting tool: ' . $key);
+            }
+            $existing = $this->settingGet(array('keys' => array($key), 'store_id' => $storeId));
+            $before[$key] = array_key_exists($key, $existing['settings']) ? $existing['settings'][$key] : null;
+            $after[$key] = is_scalar($value) || $value === null ? (string)$value : Util::jsonEncode($value);
+        }
+
+        $result = $this->writeDiff('setting', $storeId, $before, $after, $args);
+        $result['executed'] = false;
+        if (empty($args['dry_run'])) {
+            foreach ($after as $key => $value) {
+                $this->repository->query("DELETE FROM `" . $this->prefix . "setting` WHERE `store_id` = '" . $storeId . "' AND `key` = '" . $this->escape($key) . "'");
+                $this->repository->query("INSERT INTO `" . $this->prefix . "setting` SET
+                    `store_id` = '" . $storeId . "',
+                    `code` = 'config',
+                    `key` = '" . $this->escape($key) . "',
+                    `value` = '" . $this->escape($value) . "',
+                    `serialized` = '0'");
+            }
+            $result['settings'] = $this->settingGet(array('keys' => array_keys($after), 'store_id' => $storeId))['settings'];
+            $result['executed'] = true;
+        }
+        return $result;
+    }
+
+    private function mediaSearch($args) {
+        $query = strtolower((string)($args['query'] ?? ''));
+        $limit = $this->limit($args['limit'] ?? 25);
+        $root = $this->mediaRoot();
+        $base = $root . 'catalog';
+        $items = array();
+        if (is_dir($base)) {
+            $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($base, \FilesystemIterator::SKIP_DOTS));
+            foreach ($iterator as $file) {
+                if (!$file->isFile()) continue;
+                $path = 'catalog/' . str_replace('\\', '/', substr($file->getPathname(), strlen($base) + 1));
+                if (!$this->isAllowedMediaExtension($path)) continue;
+                if ($query !== '' && strpos(strtolower($path), $query) === false) continue;
+                $items[] = $this->mediaMetadata($path);
+                if (count($items) >= $limit) break;
+            }
+        }
+        return array('items' => $items, 'limit' => $limit);
+    }
+
+    private function mediaGet($args) {
+        $path = $this->normalizeMediaPath($args['path'] ?? ($args['image'] ?? ''));
+        return array('media' => $this->mediaMetadata($path));
+    }
+
+    private function mediaUpload($args) {
+        $path = $this->normalizeMediaPath($args['target_path'] ?? '');
+        $content = (string)($args['content_base64'] ?? '');
+        if ($content === '') {
+            throw new McpException('INVALID_INPUT', 'Media upload requires content_base64.');
+        }
+        $bytes = base64_decode($content, true);
+        if ($bytes === false) {
+            throw new McpException('INVALID_INPUT', 'Media upload content_base64 is invalid.');
+        }
+        if (strlen($bytes) > 5242880) {
+            throw new McpException('INVALID_INPUT', 'Media upload exceeds 5MB limit.');
+        }
+        $imageInfo = @getimagesizefromstring($bytes);
+        if (!$imageInfo || empty($imageInfo['mime']) || !$this->isAllowedMediaMime($imageInfo['mime'])) {
+            throw new McpException('INVALID_INPUT', 'Media upload must be a supported image.');
+        }
+        $result = $this->writeDiff('media', $path, $this->mediaMetadata($path), array('path' => $path, 'size' => strlen($bytes), 'mime' => $imageInfo['mime']), $args);
+        $result['executed'] = false;
+        if (empty($args['dry_run'])) {
+            $absolute = $this->mediaRoot() . $path;
+            $directory = dirname($absolute);
+            if (!is_dir($directory) && !mkdir($directory, 0755, true)) {
+                throw new McpException('SERVER_ERROR', 'Unable to create media directory.');
+            }
+            if (file_put_contents($absolute, $bytes) === false) {
+                throw new McpException('SERVER_ERROR', 'Unable to write media file.');
+            }
+            $result['media'] = $this->mediaMetadata($path);
+            $result['executed'] = true;
+        }
+        return $result;
+    }
+
+    private function mediaDelete($args) {
+        $path = $this->normalizeMediaPath($args['path'] ?? ($args['image'] ?? ''));
+        $before = $this->mediaMetadata($path);
+        $result = $this->writeDiff('media', $path, $before, array('deleted' => true), $args);
+        $result['executed'] = false;
+        $result['deleted'] = false;
+        if (empty($args['dry_run'])) {
+            $absolute = $this->mediaRoot() . $path;
+            if (is_file($absolute) && !unlink($absolute)) {
+                throw new McpException('SERVER_ERROR', 'Unable to delete media file.');
+            }
+            $result['executed'] = true;
+            $result['deleted'] = true;
+        }
+        return $result;
+    }
+
     private function diagnosticStatus() {
         $registry = new ToolRegistry();
         return array(
@@ -1739,6 +2431,14 @@ class ToolExecutor {
             throw new McpException('ENTITY_NOT_FOUND', 'Coupon not found.');
         }
         return $coupon;
+    }
+
+    private function reviewRequired($reviewId) {
+        $review = $this->repository->query("SELECT * FROM `" . $this->prefix . "review` WHERE review_id = '" . (int)$reviewId . "' LIMIT 1")->row;
+        if (!$review) {
+            throw new McpException('ENTITY_NOT_FOUND', 'Review not found.');
+        }
+        return $review;
     }
 
     private function customerAddressRequired($customerId, $addressId) {
@@ -1819,6 +2519,46 @@ class ToolExecutor {
         return $customerId;
     }
 
+    private function categoryRequired($categoryId) {
+        $row = $this->repository->query("SELECT * FROM `" . $this->prefix . "category` WHERE category_id = '" . (int)$categoryId . "' LIMIT 1")->row;
+        if (!$row) {
+            throw new McpException('ENTITY_NOT_FOUND', 'Category not found.');
+        }
+        return $row;
+    }
+
+    private function categoryDescriptionRequired($categoryId, $languageId) {
+        $row = $this->repository->query("SELECT * FROM `" . $this->prefix . "category_description` WHERE category_id = '" . (int)$categoryId . "' AND language_id = '" . (int)$languageId . "' LIMIT 1")->row;
+        if (!$row) {
+            throw new McpException('ENTITY_NOT_FOUND', 'Category language description not found.');
+        }
+        return $row;
+    }
+
+    private function manufacturerRequired($manufacturerId) {
+        $row = $this->repository->query("SELECT * FROM `" . $this->prefix . "manufacturer` WHERE manufacturer_id = '" . (int)$manufacturerId . "' LIMIT 1")->row;
+        if (!$row) {
+            throw new McpException('ENTITY_NOT_FOUND', 'Manufacturer not found.');
+        }
+        return $row;
+    }
+
+    private function informationRequired($informationId) {
+        $row = $this->repository->query("SELECT * FROM `" . $this->prefix . "information` WHERE information_id = '" . (int)$informationId . "' LIMIT 1")->row;
+        if (!$row) {
+            throw new McpException('ENTITY_NOT_FOUND', 'Information page not found.');
+        }
+        return $row;
+    }
+
+    private function informationDescriptionRequired($informationId, $languageId) {
+        $row = $this->repository->query("SELECT * FROM `" . $this->prefix . "information_description` WHERE information_id = '" . (int)$informationId . "' AND language_id = '" . (int)$languageId . "' LIMIT 1")->row;
+        if (!$row) {
+            throw new McpException('ENTITY_NOT_FOUND', 'Information page language description not found.');
+        }
+        return $row;
+    }
+
     private function productRequired($productId) {
         $row = $this->repository->query("SELECT * FROM `" . $this->prefix . "product` WHERE product_id = '" . (int)$productId . "' LIMIT 1")->row;
         if (!$row) {
@@ -1890,6 +2630,82 @@ class ToolExecutor {
 
     private function isSensitiveSettingKey($key) {
         return (bool)preg_match('/(secret|token|password|passwd|encryption|api|key|private|credential)/i', (string)$key);
+    }
+
+    private function isBlockedSettingWrite($key) {
+        return (bool)preg_match('/^(payment|shipping|tax|mail|api|captcha|fraud|module_mcp_advanced|module_mcp_alert|config_encryption)/i', (string)$key);
+    }
+
+    private function settingKeyAllowedForTool($toolName, $key) {
+        $key = (string)$key;
+        if ($toolName === 'admin.setting.update') {
+            return true;
+        }
+        if ($toolName === 'admin.setting.update_basic') {
+            return (bool)preg_match('/^config_(name|owner|address|email|telephone|fax|open|comment|country_id|zone_id|language|currency)$/', $key);
+        }
+        if ($toolName === 'admin.setting.update_seo') {
+            return (bool)preg_match('/^config_(meta_|seo_|robots)/', $key);
+        }
+        if ($toolName === 'admin.setting.update_localisation') {
+            return (bool)preg_match('/^config_(country_id|zone_id|language|admin_language|currency|length_class_id|weight_class_id)$/', $key);
+        }
+        return false;
+    }
+
+    private function mediaRoot() {
+        if (method_exists($this->repository, 'imageRoot')) {
+            $root = (string)$this->repository->imageRoot();
+        } elseif (defined('DIR_IMAGE')) {
+            $root = DIR_IMAGE;
+        } else {
+            throw new McpException('SERVER_ERROR', 'OpenCart image directory is unavailable.');
+        }
+        return rtrim(str_replace('\\', '/', $root), '/') . '/';
+    }
+
+    private function normalizeMediaPath($path) {
+        $path = str_replace('\\', '/', trim((string)$path));
+        $path = ltrim($path, '/');
+        if ($path === '' || strpos($path, "\0") !== false || strpos($path, '..') !== false || strpos($path, 'catalog/') !== 0) {
+            throw new McpException('INVALID_INPUT', 'Media path must stay inside catalog image directory.');
+        }
+        if (!$this->isAllowedMediaExtension($path)) {
+            throw new McpException('INVALID_INPUT', 'Media path extension is not allowed.');
+        }
+        return $path;
+    }
+
+    private function mediaMetadata($path) {
+        $path = $this->normalizeMediaPath($path);
+        $absolute = $this->mediaRoot() . $path;
+        $exists = is_file($absolute);
+        $mime = '';
+        if ($exists) {
+            $info = @getimagesize($absolute);
+            $mime = $info && !empty($info['mime']) ? $info['mime'] : '';
+        }
+        return array(
+            'path' => $path,
+            'url' => $this->mediaUrl($path),
+            'exists' => $exists,
+            'size' => $exists ? filesize($absolute) : 0,
+            'mime' => $mime,
+            'modified' => $exists ? date('c', filemtime($absolute)) : null,
+        );
+    }
+
+    private function mediaUrl($path) {
+        $base = defined('HTTP_CATALOG') ? HTTP_CATALOG : (defined('HTTP_SERVER') ? HTTP_SERVER : '');
+        return $base ? rtrim($base, '/') . '/image/' . $path : '';
+    }
+
+    private function isAllowedMediaExtension($path) {
+        return in_array(strtolower(pathinfo((string)$path, PATHINFO_EXTENSION)), array('jpg', 'jpeg', 'png', 'gif', 'webp'), true);
+    }
+
+    private function isAllowedMediaMime($mime) {
+        return in_array(strtolower((string)$mime), array('image/jpeg', 'image/png', 'image/gif', 'image/webp'), true);
     }
 
     private function limit($value) {

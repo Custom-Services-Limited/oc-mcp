@@ -63,6 +63,16 @@ assert_true($registry->find('admin.inventory.adjust')['confirmation'] === true, 
 assert_true($registry->find('admin.product.update_price')['confirmation'] === true, 'product price update must require confirmation');
 assert_true($registry->find('admin.coupon.create')['confirmation'] === true, 'coupon create must require confirmation');
 assert_true(strpos($registry->find('admin.inventory.adjust')['description'], 'WRITE') !== false, 'write tool description should warn about side effects');
+$toolSource = file_get_contents($root . '/src/shared/system/library/mcp/tools.php');
+preg_match_all("/case '([^']+)'/", $toolSource, $toolCaseMatches);
+$executorCases = array_flip($toolCaseMatches[1]);
+$missingWriteCases = array();
+foreach ($tools as $tool) {
+    if (!empty($tool['write']) && !isset($executorCases[$tool['name']])) {
+        $missingWriteCases[] = $tool['name'];
+    }
+}
+assert_true(!$missingWriteCases, 'write tools require explicit executor cases: ' . implode(', ', $missingWriteCases));
 
 $requiredPrdTools = array(
     'cart.remove_item',
@@ -147,6 +157,10 @@ $validator = new \OpenCartMcp\SchemaValidator();
 $schema = $registry->find('admin.inventory.adjust')['inputSchema'];
 assert_true($validator->validate($schema, array('product_id' => 1, 'delta' => 2, 'reason' => 'stock count', 'dry_run' => true)) === array(), 'valid inventory adjust dry-run input should pass');
 assert_true(count($validator->validate($schema, array('product_id' => 1, 'delta' => 2, 'extra' => 'x'))) >= 2, 'invalid inventory adjust input should report errors');
+$schema = $registry->find('admin.product.update_images')['inputSchema'];
+assert_true($validator->validate($schema, array('product_id' => 1, 'images' => array(array('image' => 'catalog/products/a.png')), 'reason' => 'image update')) === array(), 'product image update schema should accept structured image inputs');
+$schema = $registry->find('admin.media.upload')['inputSchema'];
+assert_true($validator->validate($schema, array('target_path' => 'catalog/mcp/test.png', 'content_base64' => 'abcd', 'reason' => 'upload')) === array(), 'media upload schema should accept base64 content inputs');
 
 class FakeConfig {
     public function get($key) {
@@ -203,13 +217,25 @@ class FakeToolRepository {
     public $customers = array();
     public $addresses = array();
     public $products = array();
+    public $productDescriptions = array();
+    public $productSpecials = array();
+    public $productDiscounts = array();
+    public $productCategories = array();
+    public $productImages = array();
+    public $categories = array();
+    public $categoryDescriptions = array();
+    public $manufacturers = array();
+    public $informations = array();
+    public $informationDescriptions = array();
     public $movements = array();
     public $orders = array();
     public $orderHistories = array();
     public $returns = array();
     public $coupons = array();
     public $settings = array();
+    public $reviews = array();
     public $queries = array();
+    private $imageRoot;
     public $lastId = 100;
 
     public function __construct() {
@@ -252,6 +278,53 @@ class FakeToolRepository {
             'stock_status_id' => 7,
             'subtract' => 1,
         );
+        $this->productDescriptions[9] = array(
+            'product_id' => 9,
+            'language_id' => 1,
+            'name' => 'Test Product',
+            'description' => '',
+            'tag' => '',
+            'meta_title' => 'Test Product',
+            'meta_description' => '',
+            'meta_keyword' => '',
+        );
+        $this->categories[20] = array(
+            'category_id' => 20,
+            'parent_id' => 0,
+            'sort_order' => 0,
+            'status' => 1,
+            'image' => '',
+        );
+        $this->categoryDescriptions[20] = array(
+            'category_id' => 20,
+            'language_id' => 1,
+            'name' => 'Test Category',
+            'description' => '',
+            'meta_title' => 'Test Category',
+            'meta_description' => '',
+            'meta_keyword' => '',
+        );
+        $this->manufacturers[30] = array(
+            'manufacturer_id' => 30,
+            'name' => 'Test Manufacturer',
+            'image' => '',
+            'sort_order' => 0,
+        );
+        $this->informations[40] = array(
+            'information_id' => 40,
+            'bottom' => 0,
+            'sort_order' => 0,
+            'status' => 1,
+        );
+        $this->informationDescriptions[40] = array(
+            'information_id' => 40,
+            'language_id' => 1,
+            'title' => 'Test Page',
+            'description' => '',
+            'meta_title' => 'Test Page',
+            'meta_description' => '',
+            'meta_keyword' => '',
+        );
         $this->orders[1001] = array(
             'order_id' => 1001,
             'customer_id' => 42,
@@ -282,10 +355,22 @@ class FakeToolRepository {
         );
         $this->settings['config_name'] = 'Old Store';
         $this->settings['config_meta_title'] = 'Old Title';
+        $this->reviews[7] = array(
+            'review_id' => 7,
+            'product_id' => 9,
+            'customer_id' => 42,
+            'author' => 'Ada',
+            'text' => 'Pending review',
+            'rating' => 4,
+            'status' => 0,
+            'date_added' => '2026-01-01',
+        );
+        $this->imageRoot = sys_get_temp_dir() . '/oc-mcp-test-images-' . getmypid() . '/';
     }
 
     public function db() { return null; }
     public function prefix() { return 'oc_'; }
+    public function imageRoot() { return $this->imageRoot; }
     public function isEnabled() { return true; }
     public function config($key, $default = null) {
         $values = array('config_currency' => 'GBP', 'config_language_id' => 1, 'config_stock_checkout' => '0');
@@ -310,6 +395,20 @@ class FakeToolRepository {
     }
     public function saveCart($cartId, $clientId, $data) {
         $this->carts[$cartId]['data'] = $data;
+    }
+    public function quoteShipping($cart, $args) {
+        return array(
+            'available' => true,
+            'quotes' => array(array('code' => 'flat.flat', 'title' => 'Flat Rate', 'cost' => 5.00)),
+            'messages' => array(),
+        );
+    }
+    public function quotePayment($cart, $args) {
+        return array(
+            'available' => true,
+            'methods' => array(array('code' => 'cod', 'title' => 'Cash On Delivery')),
+            'messages' => array(),
+        );
     }
     public function verifyCustomerContext($token) {
         return $token === 'customer-token' ? 42 : 0;
@@ -336,6 +435,28 @@ class FakeToolRepository {
             preg_match("/`key` = '([^']+)'/", $sql, $match);
             $key = isset($match[1]) ? $match[1] : 'config_name';
             return new FakeQueryResult(isset($this->settings[$key]) ? array('value' => $this->settings[$key], 'serialized' => 0) : array());
+        }
+
+        if (strpos($sql, 'UPDATE `oc_review`') !== false) {
+            if (strpos($sql, 'status') !== false && strpos($sql, "'1'") !== false) {
+                $this->reviews[7]['status'] = 1;
+            }
+            if (strpos($sql, 'Updated review') !== false) {
+                $this->reviews[7]['text'] = 'Updated review';
+            }
+            if (strpos($sql, 'rating') !== false && strpos($sql, "'5'") !== false) {
+                $this->reviews[7]['rating'] = 5;
+            }
+            return new FakeQueryResult();
+        }
+
+        if (strpos($sql, 'DELETE FROM `oc_review`') !== false) {
+            unset($this->reviews[7]);
+            return new FakeQueryResult();
+        }
+
+        if (strpos($sql, 'FROM `oc_review`') !== false) {
+            return new FakeQueryResult(isset($this->reviews[7]) ? $this->reviews[7] : array(), array_values($this->reviews));
         }
 
         if (strpos($sql, 'DELETE FROM `oc_setting`') !== false) {
@@ -403,11 +524,111 @@ class FakeToolRepository {
             return new FakeQueryResult();
         }
 
+        if (strpos($sql, 'INSERT INTO `oc_product`') !== false) {
+            $this->lastId = 301;
+            $this->products[301] = array(
+                'product_id' => 301,
+                'name' => strpos($sql, 'New Product') !== false ? 'New Product' : '',
+                'description' => '',
+                'meta_title' => 'New Product',
+                'model' => 'NP-1',
+                'sku' => '',
+                'quantity' => 4,
+                'price' => '19.95',
+                'image' => '',
+                'status' => 0,
+                'date_available' => '2026-01-01',
+                'stock_status_id' => 0,
+                'subtract' => 1,
+            );
+            return new FakeQueryResult();
+        }
+
+        if (strpos($sql, 'INSERT INTO `oc_product_description`') !== false) {
+            preg_match("/product_id = '([0-9]+)'/", $sql, $match);
+            $productId = isset($match[1]) ? (int)$match[1] : 301;
+            $this->productDescriptions[$productId] = array(
+                'product_id' => $productId,
+                'language_id' => 1,
+                'name' => strpos($sql, 'New Product') !== false ? 'New Product' : 'Test Product',
+                'description' => '',
+                'tag' => '',
+                'meta_title' => strpos($sql, 'New Product') !== false ? 'New Product' : 'Test Product',
+                'meta_description' => '',
+                'meta_keyword' => '',
+            );
+            return new FakeQueryResult();
+        }
+
+        if (strpos($sql, 'UPDATE `oc_product_description`') !== false) {
+            preg_match("/product_id = '([0-9]+)'/", $sql, $match);
+            $productId = isset($match[1]) ? (int)$match[1] : 9;
+            if (isset($this->productDescriptions[$productId]) && strpos($sql, 'Updated Product') !== false) {
+                $this->productDescriptions[$productId]['name'] = 'Updated Product';
+                $this->products[$productId]['name'] = 'Updated Product';
+            }
+            return new FakeQueryResult();
+        }
+
+        if (strpos($sql, 'FROM `oc_product_description`') !== false) {
+            preg_match("/product_id = '([0-9]+)'/", $sql, $match);
+            $productId = isset($match[1]) ? (int)$match[1] : 9;
+            return new FakeQueryResult(isset($this->productDescriptions[$productId]) ? $this->productDescriptions[$productId] : array());
+        }
+
+        if (strpos($sql, 'DELETE FROM `oc_product_special`') !== false) {
+            $this->productSpecials = array();
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'INSERT INTO `oc_product_special`') !== false) {
+            $this->productSpecials[] = $sql;
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'DELETE FROM `oc_product_discount`') !== false) {
+            $this->productDiscounts = array();
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'INSERT INTO `oc_product_discount`') !== false) {
+            $this->productDiscounts[] = $sql;
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'DELETE FROM `oc_product_to_category`') !== false) {
+            $this->productCategories = array();
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'INSERT INTO `oc_product_to_category`') !== false) {
+            preg_match("/category_id = '([0-9]+)'/", $sql, $match);
+            if (isset($match[1])) $this->productCategories[] = (int)$match[1];
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'DELETE FROM `oc_product_image`') !== false) {
+            $this->productImages = array();
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'INSERT INTO `oc_product_image`') !== false) {
+            preg_match("/image = '([^']+)'/", $sql, $match);
+            $this->productImages[] = isset($match[1]) ? $match[1] : '';
+            return new FakeQueryResult();
+        }
+
         if (strpos($sql, 'UPDATE `oc_product`') !== false) {
             preg_match("/SET quantity = '(-?[0-9]+)'/", $sql, $match);
             if (isset($match[1])) {
                 $this->products[9]['quantity'] = (int)$match[1];
             }
+            if (strpos($sql, "price` = '14.5'") !== false || strpos($sql, "price = '14.5'") !== false) {
+                $this->products[9]['price'] = '14.5';
+            }
+            if (strpos($sql, 'catalog/products/c.jpg') !== false) {
+                $this->products[9]['image'] = 'catalog/products/c.jpg';
+            } elseif (strpos($sql, 'catalog/products/a.png') !== false) {
+                $this->products[9]['image'] = 'catalog/products/a.png';
+            }
+            return new FakeQueryResult();
+        }
+
+        if (strpos($sql, 'DELETE FROM `oc_product`') !== false) {
+            unset($this->products[9]);
             return new FakeQueryResult();
         }
 
@@ -417,6 +638,96 @@ class FakeToolRepository {
 
         if (strpos($sql, 'FROM `oc_product` p') !== false) {
             return new FakeQueryResult($this->products[9]);
+        }
+
+        if (strpos($sql, 'INSERT INTO `oc_category`') !== false) {
+            $this->lastId = 320;
+            $this->categories[320] = array('category_id' => 320, 'parent_id' => 0, 'sort_order' => 0, 'status' => 0, 'image' => '');
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'INSERT INTO `oc_category_description`') !== false) {
+            preg_match("/category_id = '([0-9]+)'/", $sql, $match);
+            $categoryId = isset($match[1]) ? (int)$match[1] : 320;
+            $this->categoryDescriptions[$categoryId] = array('category_id' => $categoryId, 'language_id' => 1, 'name' => strpos($sql, 'New Category') !== false ? 'New Category' : 'Test Category', 'description' => '', 'meta_title' => 'New Category', 'meta_description' => '', 'meta_keyword' => '');
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'UPDATE `oc_category_description`') !== false) {
+            preg_match("/category_id = '([0-9]+)'/", $sql, $match);
+            $categoryId = isset($match[1]) ? (int)$match[1] : 20;
+            if (isset($this->categoryDescriptions[$categoryId]) && strpos($sql, 'Updated Category') !== false) {
+                $this->categoryDescriptions[$categoryId]['name'] = 'Updated Category';
+            }
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'FROM `oc_category_description`') !== false) {
+            preg_match("/category_id = '([0-9]+)'/", $sql, $match);
+            $categoryId = isset($match[1]) ? (int)$match[1] : 20;
+            return new FakeQueryResult(isset($this->categoryDescriptions[$categoryId]) ? $this->categoryDescriptions[$categoryId] : array());
+        }
+        if (strpos($sql, 'UPDATE `oc_category`') !== false) {
+            preg_match("/category_id = '([0-9]+)'/", $sql, $match);
+            $categoryId = isset($match[1]) ? (int)$match[1] : 20;
+            if (isset($this->categories[$categoryId]) && strpos($sql, 'status') !== false) $this->categories[$categoryId]['status'] = strpos($sql, "'0'") !== false ? 0 : 1;
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'DELETE FROM `oc_category`') !== false) {
+            unset($this->categories[20]);
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'FROM `oc_category`') !== false) {
+            preg_match("/category_id = '([0-9]+)'/", $sql, $match);
+            $categoryId = isset($match[1]) ? (int)$match[1] : 20;
+            return new FakeQueryResult(isset($this->categories[$categoryId]) ? $this->categories[$categoryId] : array(), array_values($this->categories));
+        }
+
+        if (strpos($sql, 'INSERT INTO `oc_manufacturer`') !== false) {
+            $this->lastId = 330;
+            $this->manufacturers[330] = array('manufacturer_id' => 330, 'name' => 'New Manufacturer', 'image' => '', 'sort_order' => 0);
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'UPDATE `oc_manufacturer`') !== false) {
+            if (strpos($sql, 'Updated Manufacturer') !== false) $this->manufacturers[30]['name'] = 'Updated Manufacturer';
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'FROM `oc_manufacturer`') !== false) {
+            preg_match("/manufacturer_id = '([0-9]+)'/", $sql, $match);
+            $manufacturerId = isset($match[1]) ? (int)$match[1] : 30;
+            return new FakeQueryResult(isset($this->manufacturers[$manufacturerId]) ? $this->manufacturers[$manufacturerId] : array(), array_values($this->manufacturers));
+        }
+
+        if (strpos($sql, 'INSERT INTO `oc_information`') !== false) {
+            $this->lastId = 340;
+            $this->informations[340] = array('information_id' => 340, 'bottom' => 0, 'sort_order' => 0, 'status' => 0);
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'INSERT INTO `oc_information_description`') !== false) {
+            preg_match("/information_id = '([0-9]+)'/", $sql, $match);
+            $informationId = isset($match[1]) ? (int)$match[1] : 340;
+            $this->informationDescriptions[$informationId] = array('information_id' => $informationId, 'language_id' => 1, 'title' => strpos($sql, 'New Page') !== false ? 'New Page' : 'Test Page', 'description' => '', 'meta_title' => 'New Page', 'meta_description' => '', 'meta_keyword' => '');
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'UPDATE `oc_information_description`') !== false) {
+            preg_match("/information_id = '([0-9]+)'/", $sql, $match);
+            $informationId = isset($match[1]) ? (int)$match[1] : 40;
+            if (isset($this->informationDescriptions[$informationId]) && strpos($sql, 'Updated Page') !== false) $this->informationDescriptions[$informationId]['title'] = 'Updated Page';
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'FROM `oc_information_description`') !== false) {
+            preg_match("/information_id = '([0-9]+)'/", $sql, $match);
+            $informationId = isset($match[1]) ? (int)$match[1] : 40;
+            return new FakeQueryResult(isset($this->informationDescriptions[$informationId]) ? $this->informationDescriptions[$informationId] : array());
+        }
+        if (strpos($sql, 'UPDATE `oc_information`') !== false) {
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'DELETE FROM `oc_information`') !== false) {
+            unset($this->informations[40]);
+            return new FakeQueryResult();
+        }
+        if (strpos($sql, 'FROM `oc_information`') !== false) {
+            preg_match("/information_id = '([0-9]+)'/", $sql, $match);
+            $informationId = isset($match[1]) ? (int)$match[1] : 40;
+            return new FakeQueryResult(isset($this->informations[$informationId]) ? $this->informations[$informationId] : array(), array_values($this->informations));
         }
 
         if (strpos($sql, 'UPDATE `oc_coupon`') !== false) {
@@ -439,6 +750,11 @@ class FakeToolRepository {
 
         if (strpos($sql, 'FROM `oc_coupon`') !== false) {
             return new FakeQueryResult(isset($this->coupons[3]) ? $this->coupons[3] : array(), array_values($this->coupons));
+        }
+
+        if (strpos($sql, 'DELETE FROM `oc_customer`') !== false) {
+            unset($this->customers[42]);
+            return new FakeQueryResult();
         }
 
         if (strpos($sql, 'FROM `oc_customer`') !== false) {
@@ -522,7 +838,9 @@ $executor->execute('cart.remove_item', array('cart_id' => $cartId, 'product_id' 
 $cartAfterRemove = $executor->execute('cart.get', array('cart_id' => $cartId), $toolClient, 'req-6');
 assert_true(!isset($cartAfterRemove['data']['items']['9']), 'cart.remove_item should remove the requested product');
 $shippingQuote = $executor->execute('cart.quote_shipping', array('cart_id' => $cartId), $toolClient, 'req-7');
-assert_true($shippingQuote['available'] === false && count($shippingQuote['messages']) > 0, 'shipping quote should fail safely when checkout adapters are unavailable');
+assert_true($shippingQuote['available'] === true && $shippingQuote['order_created'] === false && $shippingQuote['payment_captured'] === false, 'cart.quote_shipping should return adapter quotes without checkout side effects');
+$paymentQuote = $executor->execute('cart.quote_payment', array('cart_id' => $cartId), $toolClient, 'req-7b');
+assert_true($paymentQuote['available'] === true && $paymentQuote['payment_captured'] === false, 'cart.quote_payment should return adapter methods without capturing payment');
 $checkout = $executor->execute('checkout.validate', array('cart_id' => $cartId), $toolClient, 'req-8');
 assert_true($checkout['ready'] === false, 'checkout.validate should not create orders and should report missing readiness');
 
@@ -573,6 +891,58 @@ $couponUpdate = $executor->execute('admin.coupon.update', array('coupon_id' => 3
 assert_true($couponUpdate['executed'] === true && $couponUpdate['coupon']['code'] === 'SAVE20', 'admin.coupon.update should execute allowed coupon field changes');
 $couponDelete = $executor->execute('admin.coupon.delete', array('coupon_id' => 3, 'reason' => 'campaign ended'), $toolClient, 'req-12q');
 assert_true($couponDelete['executed'] === true && $couponDelete['deleted'] === true, 'admin.coupon.delete should delete the selected coupon');
+$reviewApprove = $executor->execute('admin.review.approve', array('review_id' => 7, 'reason' => 'moderation approved'), $toolClient, 'req-12r');
+assert_true($reviewApprove['executed'] === true && $reviewApprove['review']['status'] === 1, 'admin.review.approve should approve the selected review');
+$reviewUpdate = $executor->execute('admin.review.update', array('review_id' => 7, 'text' => 'Updated review', 'rating' => 5, 'reason' => 'moderation correction'), $toolClient, 'req-12s');
+assert_true($reviewUpdate['executed'] === true && $reviewUpdate['review']['rating'] === 5, 'admin.review.update should execute allowed review changes');
+$reviewDelete = $executor->execute('admin.review.delete', array('review_id' => 7, 'reason' => 'spam'), $toolClient, 'req-12t');
+assert_true($reviewDelete['executed'] === true && $reviewDelete['deleted'] === true, 'admin.review.delete should delete the selected review');
+$productCreate = $executor->execute('admin.product.create', array('name' => 'New Product', 'model' => 'NP-1', 'price' => 19.95, 'quantity' => 4, 'reason' => 'catalog addition'), $toolClient, 'req-12u');
+assert_true($productCreate['executed'] === true && $productCreate['product_id'] > 0, 'admin.product.create should create product rows');
+$productUpdate = $executor->execute('admin.product.update', array('product_id' => 9, 'name' => 'Updated Product', 'price' => 14.5, 'language_id' => 1, 'reason' => 'catalog correction'), $toolClient, 'req-12v');
+assert_true($productUpdate['executed'] === true && (float)$productUpdate['product']['price'] === 14.5, 'admin.product.update should update allowed product fields');
+$productSpecials = $executor->execute('admin.product.update_specials', array('product_id' => 9, 'specials' => array(array('price' => 9.99)), 'reason' => 'sale'), $toolClient, 'req-12w');
+assert_true($productSpecials['executed'] === true && count($productSpecials['specials']) === 1, 'admin.product.update_specials should replace specials');
+$productDiscounts = $executor->execute('admin.product.update_discounts', array('product_id' => 9, 'discounts' => array(array('quantity' => 5, 'price' => 11.5)), 'reason' => 'bulk pricing'), $toolClient, 'req-12x');
+assert_true($productDiscounts['executed'] === true && $productDiscounts['discounts'][0]['quantity'] === 5, 'admin.product.update_discounts should replace discounts');
+$productCategories = $executor->execute('admin.product.assign_categories', array('product_id' => 9, 'category_ids' => array(20, 21), 'reason' => 'taxonomy'), $toolClient, 'req-12y');
+assert_true($productCategories['executed'] === true && count($productCategories['category_ids']) === 2, 'admin.product.assign_categories should replace category links');
+$productImages = $executor->execute('admin.product.update_images', array('product_id' => 9, 'images' => array('catalog/products/a.png', 'catalog/products/b.webp'), 'reason' => 'image ordering'), $toolClient, 'req-12z');
+assert_true($productImages['executed'] === true && $productImages['primary_image'] === 'catalog/products/a.png', 'admin.product.update_images should set product image ordering');
+$productAttach = $executor->execute('admin.product.attach_image', array('product_id' => 9, 'image' => 'catalog/products/c.jpg', 'primary' => true, 'reason' => 'hero image'), $toolClient, 'req-12aa');
+assert_true($productAttach['executed'] === true && $toolRepository->products[9]['image'] === 'catalog/products/c.jpg', 'admin.product.attach_image should attach existing images');
+$categoryCreate = $executor->execute('admin.category.create', array('name' => 'New Category', 'reason' => 'taxonomy'), $toolClient, 'req-12ab');
+assert_true($categoryCreate['executed'] === true && $categoryCreate['category_id'] > 0, 'admin.category.create should create category rows');
+$categoryUpdate = $executor->execute('admin.category.update', array('category_id' => 20, 'name' => 'Updated Category', 'language_id' => 1, 'reason' => 'taxonomy'), $toolClient, 'req-12ac');
+assert_true($categoryUpdate['executed'] === true && $categoryUpdate['category']['category_id'] === 20, 'admin.category.update should update category rows');
+$categoryStatus = $executor->execute('admin.category.update_status', array('category_id' => 20, 'status' => 0, 'reason' => 'hide category'), $toolClient, 'req-12ad');
+assert_true($categoryStatus['executed'] === true && (int)$categoryStatus['category']['status'] === 0, 'admin.category.update_status should change category status');
+$manufacturerCreate = $executor->execute('admin.manufacturer.create', array('name' => 'New Manufacturer', 'reason' => 'brand'), $toolClient, 'req-12ae');
+assert_true($manufacturerCreate['executed'] === true && $manufacturerCreate['manufacturer_id'] > 0, 'admin.manufacturer.create should create manufacturer rows');
+$manufacturerUpdate = $executor->execute('admin.manufacturer.update', array('manufacturer_id' => 30, 'name' => 'Updated Manufacturer', 'reason' => 'brand'), $toolClient, 'req-12af');
+assert_true($manufacturerUpdate['executed'] === true && $manufacturerUpdate['manufacturer']['name'] === 'Updated Manufacturer', 'admin.manufacturer.update should update manufacturer rows');
+$informationCreate = $executor->execute('admin.information.create', array('title' => 'New Page', 'description' => 'Body', 'reason' => 'content'), $toolClient, 'req-12ag');
+assert_true($informationCreate['executed'] === true && $informationCreate['information_id'] > 0, 'admin.information.create should create information rows');
+$informationUpdate = $executor->execute('admin.information.update', array('information_id' => 40, 'title' => 'Updated Page', 'language_id' => 1, 'reason' => 'content'), $toolClient, 'req-12ah');
+assert_true($informationUpdate['executed'] === true && $informationUpdate['information']['information_id'] === 40, 'admin.information.update should update information rows');
+$customerExport = $executor->execute('admin.customer.export', array('customer_id' => 42, 'reason' => 'subject access'), $toolClient, 'req-12ai');
+assert_true($customerExport['exported'] === true && $customerExport['customer']['email'] === 'kat@example.com', 'admin.customer.export should return customer-owned records');
+$mediaUpload = $executor->execute('admin.media.upload', array('target_path' => 'catalog/mcp/test.png', 'content_base64' => 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'reason' => 'asset upload'), $toolClient, 'req-12aj');
+assert_true($mediaUpload['executed'] === true && $mediaUpload['media']['exists'] === true, 'admin.media.upload should write constrained image files');
+$mediaSearch = $executor->execute('admin.media.search', array('query' => 'test.png'), $toolClient, 'req-12ak');
+assert_true(count($mediaSearch['items']) === 1, 'admin.media.search should find constrained image files');
+$mediaGet = $executor->execute('admin.media.get', array('path' => 'catalog/mcp/test.png'), $toolClient, 'req-12al');
+assert_true($mediaGet['media']['exists'] === true, 'admin.media.get should return image metadata');
+$mediaDelete = $executor->execute('admin.media.delete', array('path' => 'catalog/mcp/test.png', 'reason' => 'cleanup'), $toolClient, 'req-12am');
+assert_true($mediaDelete['executed'] === true && $mediaDelete['deleted'] === true, 'admin.media.delete should delete constrained image files');
+$productDelete = $executor->execute('admin.product.delete', array('product_id' => 9, 'reason' => 'retired'), $toolClient, 'req-12an');
+assert_true($productDelete['executed'] === true && $productDelete['deleted'] === true, 'admin.product.delete should delete selected product');
+$categoryDelete = $executor->execute('admin.category.delete', array('category_id' => 20, 'reason' => 'retired'), $toolClient, 'req-12ao');
+assert_true($categoryDelete['executed'] === true && $categoryDelete['deleted'] === true, 'admin.category.delete should delete selected category');
+$informationDelete = $executor->execute('admin.information.delete', array('information_id' => 40, 'reason' => 'retired'), $toolClient, 'req-12ap');
+assert_true($informationDelete['executed'] === true && $informationDelete['deleted'] === true, 'admin.information.delete should delete selected information page');
+$customerDelete = $executor->execute('admin.customer.delete', array('customer_id' => 42, 'reason' => 'privacy request'), $toolClient, 'req-12aq');
+assert_true($customerDelete['executed'] === true && $customerDelete['deleted'] === true, 'admin.customer.delete should delete selected customer records');
 $categorySearch = $executor->execute('admin.category.search', array('limit' => 5), $toolClient, 'req-13');
 assert_true(isset($categorySearch['items']) && $categorySearch['tool'] === 'admin.category.search', 'supplemental admin read tools should execute through safe fallback');
 $writeDryRun = $executor->execute('admin.category.create', array('name' => 'New Category', 'reason' => 'test', 'dry_run' => true), $toolClient, 'req-14');

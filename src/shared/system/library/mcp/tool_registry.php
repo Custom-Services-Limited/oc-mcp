@@ -446,6 +446,42 @@ class ToolRegistry {
             'notify' => array('type' => 'boolean'),
             'tracking' => $this->stringSchema(128),
             'image' => $this->stringSchema(255),
+            'model' => $this->stringSchema(64),
+            'sku' => $this->stringSchema(64),
+            'meta_description' => $this->stringSchema(255),
+            'meta_keyword' => $this->stringSchema(255),
+            'tag' => $this->stringSchema(255),
+            'stock_status_id' => $this->intSchema(0),
+            'manufacturer_id' => $this->intSchema(1),
+            'subtract' => $this->intSchema(0, 1),
+            'sort_order' => $this->intSchema(0),
+            'parent_id' => $this->intSchema(0),
+            'bottom' => $this->intSchema(0, 1),
+            'rating' => $this->intSchema(1, 5),
+            'category_ids' => $this->arrayOf($this->intSchema(1)),
+            'images' => $this->arrayOf(array('type' => 'object', 'additionalProperties' => false, 'properties' => array(
+                'image' => $this->stringSchema(255),
+                'sort_order' => $this->intSchema(0),
+            ), 'required' => array('image'))),
+            'specials' => $this->arrayOf(array('type' => 'object', 'additionalProperties' => false, 'properties' => array(
+                'customer_group_id' => $this->intSchema(1),
+                'priority' => $this->intSchema(0),
+                'price' => $this->numberSchema(0),
+                'date_start' => $this->stringSchema(32),
+                'date_end' => $this->stringSchema(32),
+            ), 'required' => array('price'))),
+            'discounts' => $this->arrayOf(array('type' => 'object', 'additionalProperties' => false, 'properties' => array(
+                'customer_group_id' => $this->intSchema(1),
+                'quantity' => $this->intSchema(1, 1000000),
+                'priority' => $this->intSchema(0),
+                'price' => $this->numberSchema(0),
+                'date_start' => $this->stringSchema(32),
+                'date_end' => $this->stringSchema(32),
+            ), 'required' => array('price'))),
+            'primary_image' => $this->stringSchema(255),
+            'primary' => array('type' => 'boolean'),
+            'path' => $this->stringSchema(255),
+            'content_base64' => $this->stringSchema(7000000),
             'source_path' => $this->stringSchema(255),
             'target_path' => $this->stringSchema(255),
             'reason' => $this->stringSchema(512),
@@ -677,7 +713,14 @@ class ToolRegistry {
             'admin.setting.update_seo' => 'WRITE: Update SEO settings.',
             'admin.setting.update_localisation' => 'WRITE: Update localisation settings.',
         ) as $name => $description) {
-            $add($name, $description, 'R5', 'settings_write', array('admin:setting_write'), $write, array('reason'), true);
+            $add($name, $description, 'R5', 'settings_write', array('admin:setting_write'), array(
+                'settings' => array('type' => 'object'),
+                'store_id' => $this->intSchema(0),
+                'reason' => $this->stringSchema(512),
+                'dry_run' => array('type' => 'boolean'),
+                'idempotency_key' => $this->stringSchema(128),
+                'confirmation_token' => $this->stringSchema(128),
+            ), array('settings', 'reason'), true);
         }
 
         foreach (array(
