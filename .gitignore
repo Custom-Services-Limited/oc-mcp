@@ -2,3 +2,17 @@ internal_*.*
 .serena/
 .playwright/
 DS_Store
+dist/
+node_modules/
+build/
+coverage/
+.cache/
+.next/
+turbo/
+*.log
+*.min.js
+*.map
+*.snap
+tmp/
+vendor/
+generated/

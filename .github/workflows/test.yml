@@ -1,0 +1,32 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  php:
+    name: PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.4', '8.0', '8.1', '8.2', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: json, mbstring, zip
+          coverage: none
+      - name: Validate composer metadata
+        run: composer validate --strict --no-check-publish
+      - name: Run tests
+        run: php tools/test.php
+      - name: Build installable packages
+        run: php tools/build.php --version=0.0.0-ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oc-mcp-packages-php-${{ matrix.php }}
+          path: dist/*.ocmod.zip
+

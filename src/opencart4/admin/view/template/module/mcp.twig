@@ -1,0 +1,222 @@
+{{ header }}{{ column_left }}
+<div id="content">
+  <div class="page-header">
+    <div class="container-fluid">
+      <div class="float-end">
+        <button type="submit" form="form-mcp-settings" data-bs-toggle="tooltip" title="{{ button_save }}" class="btn btn-primary"><i class="fa-solid fa-save"></i></button>
+        <a href="{{ back }}" data-bs-toggle="tooltip" title="{{ button_back }}" class="btn btn-light"><i class="fa-solid fa-reply"></i></a>
+      </div>
+      <h1>{{ heading_title }}</h1>
+      <ol class="breadcrumb">
+        {% for breadcrumb in breadcrumbs %}
+          <li class="breadcrumb-item"><a href="{{ breadcrumb.href }}">{{ breadcrumb.text }}</a></li>
+        {% endfor %}
+      </ol>
+    </div>
+  </div>
+  <div class="container-fluid">
+    {% if error_warning %}<div class="alert alert-danger"><i class="fa-solid fa-circle-exclamation"></i> {{ error_warning }}</div>{% endif %}
+    {% if success %}<div class="alert alert-success"><i class="fa-solid fa-circle-check"></i> {{ success }}</div>{% endif %}
+    {% if plain_token %}
+      <div class="alert alert-warning">
+        <strong>Token shown once:</strong>
+        <code class="text-break">{{ plain_token }}</code>
+      </div>
+    {% endif %}
+
+    <ul class="nav nav-tabs">
+      <li class="nav-item"><a href="#tab-settings" data-bs-toggle="tab" class="nav-link active">Settings</a></li>
+      <li class="nav-item"><a href="#tab-clients" data-bs-toggle="tab" class="nav-link">Clients</a></li>
+      <li class="nav-item"><a href="#tab-audit" data-bs-toggle="tab" class="nav-link">Audit Logs</a></li>
+      <li class="nav-item"><a href="#tab-diagnostics" data-bs-toggle="tab" class="nav-link">Diagnostics</a></li>
+    </ul>
+
+    <div class="tab-content">
+      <div class="tab-pane active" id="tab-settings">
+        <form action="{{ action }}" method="post" id="form-mcp-settings" class="form-horizontal">
+          <div class="row mb-3">
+            <label class="col-sm-2 col-form-label">{{ entry_status }}</label>
+            <div class="col-sm-10">
+              <select name="module_mcp_status" class="form-select">
+                <option value="1" {% if module_mcp_status %}selected{% endif %}>{{ text_enabled }}</option>
+                <option value="0" {% if not module_mcp_status %}selected{% endif %}>{{ text_disabled }}</option>
+              </select>
+            </div>
+          </div>
+          <div class="row mb-3">
+            <label class="col-sm-2 col-form-label">{{ entry_display_name }}</label>
+            <div class="col-sm-10"><input type="text" name="module_mcp_display_name" value="{{ module_mcp_display_name }}" class="form-control"/></div>
+          </div>
+          <div class="row mb-3">
+            <label class="col-sm-2 col-form-label">{{ entry_max_body }}</label>
+            <div class="col-sm-10"><input type="number" name="module_mcp_max_body_bytes" value="{{ module_mcp_max_body_bytes }}" class="form-control"/></div>
+          </div>
+          <div class="row mb-3">
+            <label class="col-sm-2 col-form-label">{{ entry_alerts }}</label>
+        <div class="col-sm-10">
+          <select name="module_mcp_alerts_enabled" class="form-select">
+            <option value="1" {% if module_mcp_alerts_enabled %}selected{% endif %}>{{ text_enabled }}</option>
+            <option value="0" {% if not module_mcp_alerts_enabled %}selected{% endif %}>{{ text_disabled }}</option>
+          </select>
+        </div>
+      </div>
+      <div class="row mb-3">
+        <label class="col-sm-2 col-form-label">{{ entry_alert_email }}</label>
+        <div class="col-sm-10"><input type="email" name="module_mcp_alert_email" value="{{ module_mcp_alert_email }}" class="form-control"/></div>
+      </div>
+      <div class="row mb-3">
+        <label class="col-sm-2 col-form-label">{{ entry_advanced_tools }}</label>
+            <div class="col-sm-10">
+              <select name="module_mcp_advanced_tools_visible" class="form-select">
+                <option value="1" {% if module_mcp_advanced_tools_visible %}selected{% endif %}>{{ text_enabled }}</option>
+                <option value="0" {% if not module_mcp_advanced_tools_visible %}selected{% endif %}>{{ text_disabled }}</option>
+              </select>
+            </div>
+          </div>
+          <div class="row mb-3">
+            <label class="col-sm-2 col-form-label">Endpoint URL</label>
+            <div class="col-sm-10"><input type="text" readonly value="{{ endpoint_url }}" class="form-control"/></div>
+          </div>
+        </form>
+      </div>
+
+      <div class="tab-pane" id="tab-clients">
+        <form action="{{ create_client }}" method="post" class="form-horizontal mb-3">
+          <div class="row mb-3">
+            <label class="col-sm-2 col-form-label">Client Name</label>
+            <div class="col-sm-10"><input type="text" name="name" value="Operations Assistant" class="form-control"/></div>
+          </div>
+          <div class="row mb-3">
+            <label class="col-sm-2 col-form-label">Capability Packs</label>
+            <div class="col-sm-10">
+              {% for key, pack in capability_packs %}
+                <div class="border rounded p-2 mb-2">
+                  <label class="form-check">
+                    <input class="form-check-input" type="checkbox" name="capability_packs[]" value="{{ key }}"/>
+                    <strong>{{ pack.label }}</strong> <span class="badge bg-secondary">{{ pack.risk }}</span>
+                  </label>
+                  <p class="mb-1">{{ pack.description }}</p>
+                  <p class="mb-1"><small>Scopes: {{ pack.scopes|join(', ') }}</small></p>
+                  {% if tools_by_capability[key] is defined %}
+                    {% for tool in tools_by_capability[key] %}
+                      <label class="form-check">
+                        <input class="form-check-input" type="checkbox" name="allowed_tools[]" value="{{ tool.name }}" checked="checked"/>
+                        <code>{{ tool.name }}</code> <span class="badge bg-secondary">{{ tool.risk_tier }}</span>{% if tool.write %} <span class="badge bg-danger">write</span>{% endif %}
+                        <br/><small>{{ tool.description }}</small>
+                      </label>
+                    {% endfor %}
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="row mb-3">
+            <label class="col-sm-2 col-form-label">High-Risk Acknowledgement</label>
+            <div class="col-sm-10">
+              <label class="form-check">
+                <input class="form-check-input" type="checkbox" name="high_risk_ack" value="1"/>
+                I reviewed the exact write/R4 tools, understand they require dry-run, confirmation, idempotency, reason, and audit alerts, and want to allow the selected tools for this client.
+              </label>
+            </div>
+          </div>
+          <div class="row mb-3">
+            <label class="col-sm-2 col-form-label">IP Allowlist</label>
+            <div class="col-sm-10"><textarea name="ip_allowlist" rows="2" class="form-control" placeholder="Optional CIDR or IP list"></textarea></div>
+          </div>
+          <div class="row mb-3">
+            <label class="col-sm-2 col-form-label">Origin Allowlist</label>
+            <div class="col-sm-10"><textarea name="origin_allowlist" rows="2" class="form-control" placeholder="Optional origins"></textarea></div>
+          </div>
+          <div class="row mb-3">
+            <label class="col-sm-2 col-form-label">Rate Limit</label>
+            <div class="col-sm-10"><input type="number" name="rate_limit_per_minute" value="60" class="form-control"/></div>
+          </div>
+          <div class="text-end"><button type="submit" class="btn btn-primary"><i class="fa-solid fa-plus"></i> {{ button_create_client }}</button></div>
+        </form>
+
+        <div class="table-responsive">
+          <table class="table table-bordered table-hover">
+            <thead><tr><td>ID</td><td>Name</td><td>Status</td><td>Token</td><td>Packs</td><td>Last Used</td><td></td></tr></thead>
+            <tbody>
+              {% for client in clients %}
+                <tr>
+                  <td>{{ client.client_id }}</td>
+                  <td>{{ client.name }}</td>
+                  <td>{{ client.status ? 'Active' : 'Revoked' }}</td>
+                  <td><code>{{ client.token_hint }}</code></td>
+                  <td>{{ client.capability_packs|join(', ') }}</td>
+                  <td>{{ client.last_used_at }}</td>
+                  <td class="text-end"><a href="{{ revoke_client }}&client_id={{ client.client_id }}" class="btn btn-danger btn-sm"><i class="fa-solid fa-ban"></i> {{ button_revoke }}</a></td>
+                </tr>
+              {% else %}
+                <tr><td colspan="7" class="text-center">No clients yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="tab-audit">
+        <form action="{{ action }}" method="get" class="border rounded p-3 mb-3">
+          <input type="hidden" name="route" value="extension/mcp/module/mcp"/>
+          <input type="hidden" name="user_token" value="{{ user_token }}"/>
+          <div class="row g-2">
+            <div class="col-md-2"><input type="text" name="request_id" value="{{ audit_filters.request_id|default('') }}" placeholder="Request ID" class="form-control"/></div>
+            <div class="col-md-2"><input type="text" name="client_id" value="{{ audit_filters.client_id|default('') }}" placeholder="Client ID" class="form-control"/></div>
+            <div class="col-md-2"><input type="text" name="tool_name" value="{{ audit_filters.tool_name|default('') }}" placeholder="Tool" class="form-control"/></div>
+            <div class="col-md-2"><input type="text" name="risk_tier" value="{{ audit_filters.risk_tier|default('') }}" placeholder="Risk" class="form-control"/></div>
+            <div class="col-md-2"><input type="text" name="status" value="{{ audit_filters.status|default('') }}" placeholder="Status" class="form-control"/></div>
+            <div class="col-md-2"><input type="text" name="ip_address" value="{{ audit_filters.ip_address|default('') }}" placeholder="IP" class="form-control"/></div>
+            <div class="col-md-2"><input type="text" name="entity_type" value="{{ audit_filters.entity_type|default('') }}" placeholder="Entity Type" class="form-control"/></div>
+            <div class="col-md-2"><input type="text" name="entity_id" value="{{ audit_filters.entity_id|default('') }}" placeholder="Entity ID" class="form-control"/></div>
+            <div class="col-md-2"><input type="text" name="date_from" value="{{ audit_filters.date_from|default('') }}" placeholder="Date From" class="form-control"/></div>
+            <div class="col-md-2"><input type="text" name="date_to" value="{{ audit_filters.date_to|default('') }}" placeholder="Date To" class="form-control"/></div>
+            <div class="col-md-4 text-end">
+              <button type="submit" class="btn btn-primary"><i class="fa-solid fa-filter"></i> Filter</button>
+              <a href="{{ audit_export }}{{ audit_filter_query }}" class="btn btn-light"><i class="fa-solid fa-download"></i> Export CSV</a>
+            </div>
+          </div>
+        </form>
+        <div class="table-responsive">
+          <table class="table table-bordered table-hover">
+            <thead><tr><td>Time</td><td>Client</td><td>Tool</td><td>Risk</td><td>Status</td><td>Entity</td><td>Duration</td><td>IP</td><td>Reviewed</td><td>Details</td><td>Review</td></tr></thead>
+            <tbody>
+              {% for log in audit_logs %}
+                <tr>
+                  <td>{{ log.created_at }}<br/><small>{{ log.request_id }}</small></td>
+                  <td>{{ log.client_id }}</td>
+                  <td>{{ log.method }}<br/><code>{{ log.tool_name }}</code></td>
+                  <td>{{ log.risk_tier }}</td>
+                  <td>{{ log.status }}{% if log.error_code %}<br/><small>{{ log.error_code }}</small>{% endif %}</td>
+                  <td>{{ log.entity_type }} {{ log.entity_id }}</td>
+                  <td>{{ log.duration_ms }}ms</td>
+                  <td>{{ log.ip_address }}</td>
+                  <td>{{ log.reviewed ? 'Yes' : 'No' }}</td>
+                  <td><a href="{{ audit_detail }}&audit_id={{ log.audit_id }}" target="_blank" class="btn btn-sm btn-light">Details</a></td>
+                  <td>
+                    <form action="{{ audit_review }}" method="post">
+                      <input type="hidden" name="audit_id" value="{{ log.audit_id }}"/>
+                      <input type="text" name="admin_note" value="{{ log.admin_note }}" class="form-control form-control-sm" placeholder="Admin note"/>
+                      <button type="submit" class="btn btn-sm btn-light mt-1">Mark reviewed</button>
+                    </form>
+                  </td>
+                </tr>
+              {% else %}
+                <tr><td colspan="11" class="text-center">No audit logs found.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="tab-diagnostics">
+        <table class="table table-bordered">
+          <tr><td>Health URL</td><td><code>{{ health_url }}</code></td></tr>
+          <tr><td>Protocol</td><td>Streamable HTTP JSON request/response</td></tr>
+          <tr><td>Writes</td><td>Dry-run, confirmation token, idempotency key, reason, and audit required for R3/R4 tools.</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{{ footer }}

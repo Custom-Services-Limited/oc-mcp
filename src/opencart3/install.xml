@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<modification>
+  <name>OpenCart MCP Server</name>
+  <code>oc_mcp_server</code>
+  <version>0.1.0</version>
+  <author>Custom Services Limited</author>
+  <link>https://github.com/Custom-Services-Limited/oc-mcp/</link>
+</modification>
+
