@@ -1,6 +1,6 @@
 # OpenCart MCP Server
 
-OpenCart MCP Server is an installable OpenCart extension that exposes a controlled Model Context Protocol endpoint for merchant-approved AI clients and automation tools.
+OpenCart MCP Server is a PHP MCP Server packaged as an installable OpenCart plugin/extension. It exposes a controlled Model Context Protocol endpoint for merchant-approved AI clients and automation tools.
 
 Project repository:
 
