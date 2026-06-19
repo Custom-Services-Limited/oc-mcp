@@ -14,6 +14,21 @@ function mcp_protocol_error_code($response) {
     return isset($response['error']['data']['code']) ? $response['error']['data']['code'] : '';
 }
 
+function mcp_protocol_admin_write_client() {
+    return array(
+        'client_id' => 8,
+        'name' => 'Admin Write Client',
+        'scopes' => array('mcp:protocol', 'admin:inventory_write'),
+        'capability_packs' => array('admin_inventory_write'),
+        'allowed_tools' => array('admin.inventory.adjust'),
+        'allowed_store_ids' => array(),
+        'ip_allowlist' => '',
+        'origin_allowlist' => '',
+        'rate_limit_per_minute' => 60,
+        'user_group_id' => 1,
+    );
+}
+
 mcp_test_case('protocol rejects invalid JSON before dispatch', function () {
     $repository = new McpTestProtocolRepository();
     $server = new \OpenCartMcp\ProtocolServer($repository);
@@ -99,4 +114,62 @@ mcp_test_case('protocol filters tools and resources by client scope', function (
     mcp_assert_true(!in_array('admin.product.search', $toolNames, true), 'admin tool should be hidden from catalog client');
     mcp_assert_true(in_array('opencart://store/config', $resourceUris, true), 'store config resource should be visible');
     mcp_assert_true(!in_array('opencart://admin/schema/customer', $resourceUris, true), 'admin schema resource should be hidden');
+});
+
+mcp_test_case('protocol validates tools/call input schema before execution', function () {
+    $server = new \OpenCartMcp\ProtocolServer(new McpTestProtocolRepository());
+    $response = $server->handle(
+        '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog.product.get","arguments":{}}}',
+        array('REMOTE_ADDR' => '127.0.0.1'),
+        array('Authorization' => 'Bearer valid'),
+        array()
+    );
+
+    mcp_assert_same('INVALID_INPUT_SCHEMA', mcp_protocol_error_code($response), 'tools/call should reject invalid arguments before execution');
+    mcp_assert_true(isset($response['error']['data']['errors']), 'schema errors should be returned in safe error data');
+});
+
+mcp_test_case('protocol rejects tool calls outside client scopes', function () {
+    $server = new \OpenCartMcp\ProtocolServer(new McpTestProtocolRepository());
+    $response = $server->handle(
+        '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"admin.product.search","arguments":{"limit":5}}}',
+        array('REMOTE_ADDR' => '127.0.0.1'),
+        array('Authorization' => 'Bearer valid'),
+        array()
+    );
+
+    mcp_assert_same('SCOPE_MISSING', mcp_protocol_error_code($response), 'admin tool call should be rejected for catalog-only client');
+});
+
+mcp_test_case('protocol write gates require OpenCart permission before dry-run execution', function () {
+    $repository = new McpTestProtocolRepository(mcp_protocol_admin_write_client());
+    $repository->modifyPermission = false;
+    $server = new \OpenCartMcp\ProtocolServer($repository);
+    $response = $server->handle(
+        '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"admin.inventory.adjust","arguments":{"product_id":9,"delta":1,"reason":"test","dry_run":true}}}',
+        array('REMOTE_ADDR' => '127.0.0.1'),
+        array('Authorization' => 'Bearer valid'),
+        array()
+    );
+
+    mcp_assert_same('OPENCART_PERMISSION_MISSING', mcp_protocol_error_code($response), 'write tools should require current OpenCart modify permission');
+});
+
+mcp_test_case('protocol write gates require idempotency and confirmation tokens before execution', function () {
+    $server = new \OpenCartMcp\ProtocolServer(new McpTestProtocolRepository(mcp_protocol_admin_write_client()));
+    $missingIdempotency = $server->handle(
+        '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"admin.inventory.adjust","arguments":{"product_id":9,"delta":1,"reason":"test"}}}',
+        array('REMOTE_ADDR' => '127.0.0.1'),
+        array('Authorization' => 'Bearer valid'),
+        array()
+    );
+    $missingConfirmation = $server->handle(
+        '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"admin.inventory.adjust","arguments":{"product_id":9,"delta":1,"reason":"test","idempotency_key":"idem-1"}}}',
+        array('REMOTE_ADDR' => '127.0.0.1'),
+        array('Authorization' => 'Bearer valid'),
+        array()
+    );
+
+    mcp_assert_same('IDEMPOTENCY_KEY_REQUIRED', mcp_protocol_error_code($missingIdempotency), 'write execution should require idempotency key');
+    mcp_assert_same('CONFIRMATION_REQUIRED', mcp_protocol_error_code($missingConfirmation), 'confirmed write execution should require dry-run confirmation token');
 });

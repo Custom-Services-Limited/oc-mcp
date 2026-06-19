@@ -31,7 +31,7 @@ mcp_test_case('next-version tool preserves release increment policy', function (
 
     $output = array();
     $code = 0;
-    exec(escapeshellarg($php) . ' ' . escapeshellarg($root . '/tools/next-version.php') . ' --latest=' . escapeshellarg('1.x.0'), $output, $code);
+    exec(escapeshellarg($php) . ' ' . escapeshellarg($root . '/tools/next-version.php') . ' --latest=' . escapeshellarg('1.x.0') . ' 2>/dev/null', $output, $code);
     mcp_assert_true($code !== 0, 'next-version should reject invalid semver');
 });
 

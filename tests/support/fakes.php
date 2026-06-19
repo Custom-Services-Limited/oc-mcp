@@ -31,6 +31,7 @@ class McpTestProtocolRepository {
     public $audits = array();
     public $enabled = true;
     public $rateLimitAllowed = true;
+    public $modifyPermission = true;
     public $client;
     private $config;
 
@@ -76,12 +77,20 @@ class McpTestProtocolRepository {
     }
 
     public function clientHasOpenCartModifyPermission($client) {
-        return true;
+        return $this->modifyPermission;
     }
 
     public function audit($data) {
         $this->audits[] = $data;
         return count($this->audits);
+    }
+
+    public function getIdempotency($clientId, $tool, $keyHash) {
+        return null;
+    }
+
+    public function consumeConfirmation($clientId, $tool, $token, $inputHash) {
+        return false;
     }
 }
 
