@@ -14,6 +14,9 @@ class Server extends \Opencart\System\Engine\Controller {
         $this->response->addHeader('Content-Type: application/json');
 
         if (($this->request->server['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
+            $this->response->addHeader('Access-Control-Allow-Origin: *');
+            $this->response->addHeader('Access-Control-Allow-Methods: POST, OPTIONS');
+            $this->response->addHeader('Access-Control-Allow-Headers: Content-Type, Authorization');
             $this->response->setOutput('{}');
             return;
         }
@@ -51,4 +54,3 @@ class Server extends \Opencart\System\Engine\Controller {
         return $headers;
     }
 }
-

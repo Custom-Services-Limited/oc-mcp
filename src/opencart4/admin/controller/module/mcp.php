@@ -59,7 +59,7 @@ class Mcp extends \Opencart\System\Engine\Controller {
         $this->load->model('extension/mcp/module/mcp');
         require_once DIR_EXTENSION . 'mcp/system/library/mcp/bootstrap.php';
 
-        if ($this->validate()) {
+        if (($this->request->server['REQUEST_METHOD'] ?? 'GET') === 'POST' && $this->validate()) {
             try {
                 $result = $this->model_extension_mcp_module_mcp->createClient(array(
                 'name' => $this->request->post['name'] ?? 'MCP Client',

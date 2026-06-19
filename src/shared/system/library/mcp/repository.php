@@ -352,6 +352,10 @@ class Repository {
     }
 
     public function checkRateLimit($client) {
+        if (mt_rand(1, 100) === 1) {
+            $this->pruneTemporaryRows();
+        }
+
         $clientId = (int)$client['client_id'];
         $limit = max(1, (int)($client['rate_limit_per_minute'] ?? 60));
         $windowKey = gmdate('YmdHi');
@@ -368,6 +372,13 @@ class Repository {
             WHERE `client_id` = '" . $clientId . "' AND `window_key` = '" . $hashKey . "'");
 
         return empty($query->row['request_count']) || (int)$query->row['request_count'] <= $limit;
+    }
+
+    private function pruneTemporaryRows() {
+        $this->query("DELETE FROM `" . $this->prefix . "mcp_rate_limit` WHERE `created_at` < DATE_SUB(NOW(), INTERVAL 1 HOUR)");
+        $this->query("DELETE FROM `" . $this->prefix . "mcp_confirmation` WHERE `expires_at` < NOW()");
+        $this->query("DELETE FROM `" . $this->prefix . "mcp_idempotency` WHERE `expires_at` < NOW()");
+        $this->query("DELETE FROM `" . $this->prefix . "mcp_cart_session` WHERE `expires_at` < NOW()");
     }
 
     public function getIdempotency($clientId, $tool, $keyHash) {
@@ -655,6 +666,9 @@ class Repository {
 
         $mail = $this->fromRegistry('mail');
         if (!is_object($mail)) {
+            $mail = $this->createMailFromConfig();
+        }
+        if (!is_object($mail)) {
             return false;
         }
 
@@ -680,6 +694,54 @@ class Repository {
         } catch (\Exception $e) {
             return false;
         }
+    }
+
+    private function createMailFromConfig() {
+        if (defined('DIR_SYSTEM') && is_file(DIR_SYSTEM . 'library/mail.php')) {
+            require_once DIR_SYSTEM . 'library/mail.php';
+        }
+
+        $engine = (string)$this->config('config_mail_engine', $this->config('config_mail_protocol', 'mail'));
+        if ($engine === '') {
+            $engine = 'mail';
+        }
+        $adapter = preg_replace('/[^a-z0-9_]/i', '', $engine);
+        if ($adapter === '') {
+            $adapter = 'mail';
+        }
+        if (defined('DIR_SYSTEM') && is_file(DIR_SYSTEM . 'library/mail/' . strtolower($adapter) . '.php')) {
+            require_once DIR_SYSTEM . 'library/mail/' . strtolower($adapter) . '.php';
+        }
+
+        $password = html_entity_decode((string)$this->config('config_mail_smtp_password', ''), ENT_QUOTES, 'UTF-8');
+
+        try {
+            if (class_exists('\\Opencart\\System\\Library\\Mail')) {
+                return new \Opencart\System\Library\Mail($engine, array(
+                    'parameter' => (string)$this->config('config_mail_parameter', ''),
+                    'smtp_hostname' => (string)$this->config('config_mail_smtp_hostname', ''),
+                    'smtp_username' => (string)$this->config('config_mail_smtp_username', ''),
+                    'smtp_password' => $password,
+                    'smtp_port' => (string)$this->config('config_mail_smtp_port', ''),
+                    'smtp_timeout' => (string)$this->config('config_mail_smtp_timeout', ''),
+                ));
+            }
+
+            if (class_exists('Mail') && class_exists('Mail\\' . $adapter)) {
+                $mail = new \Mail($adapter);
+                $mail->parameter = (string)$this->config('config_mail_parameter', '');
+                $mail->smtp_hostname = (string)$this->config('config_mail_smtp_hostname', '');
+                $mail->smtp_username = (string)$this->config('config_mail_smtp_username', '');
+                $mail->smtp_password = $password;
+                $mail->smtp_port = (string)$this->config('config_mail_smtp_port', '');
+                $mail->smtp_timeout = (string)$this->config('config_mail_smtp_timeout', '');
+                return $mail;
+            }
+        } catch (\Exception $e) {
+            return null;
+        }
+
+        return null;
     }
 
     private function fromRegistry($key) {

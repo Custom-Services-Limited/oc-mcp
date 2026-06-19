@@ -161,6 +161,9 @@ $schema = $registry->find('admin.product.update_images')['inputSchema'];
 assert_true($validator->validate($schema, array('product_id' => 1, 'images' => array(array('image' => 'catalog/products/a.png')), 'reason' => 'image update')) === array(), 'product image update schema should accept structured image inputs');
 $schema = $registry->find('admin.media.upload')['inputSchema'];
 assert_true($validator->validate($schema, array('target_path' => 'catalog/mcp/test.png', 'content_base64' => 'abcd', 'reason' => 'upload')) === array(), 'media upload schema should accept base64 content inputs');
+$arraySchema = array('type' => 'object', 'properties' => array('items' => array('type' => 'array', 'items' => array('type' => 'string'))), 'required' => array('items'), 'additionalProperties' => false);
+assert_true($validator->validate($arraySchema, array('items' => array())) === array(), 'schema validator should accept empty arrays');
+assert_true(\OpenCartMcp\Util::clientIp(array('REMOTE_ADDR' => '203.0.113.10', 'HTTP_X_FORWARDED_FOR' => '198.51.100.20')) === '203.0.113.10', 'clientIp should prefer REMOTE_ADDR over spoofable forwarded headers');
 
 class FakeConfig {
     public function get($key) {

@@ -155,11 +155,14 @@ cleanup() {
     log "KEEP_E2E=1; preserving containers and work dir: $WORK_DIR"
     return
   fi
+  if [[ -n "$WEB_CONTAINER" ]] && docker ps --format '{{.Names}}' | grep -qx "$WEB_CONTAINER"; then
+    docker exec "$WEB_CONTAINER" sh -c 'chmod -R a+rwX /var/www/html 2>/dev/null || true' >/dev/null 2>&1
+  fi
   [[ -n "$WEB_CONTAINER" ]] && docker rm -f "$WEB_CONTAINER" >/dev/null 2>&1
   [[ -n "$DB_CONTAINER" ]] && docker rm -f "$DB_CONTAINER" >/dev/null 2>&1
   [[ -n "$NETWORK" ]] && docker network rm "$NETWORK" >/dev/null 2>&1
   [[ -n "$PHP_IMAGE" ]] && docker image rm "$PHP_IMAGE" >/dev/null 2>&1
-  [[ -n "$WORK_DIR" ]] && rm -rf "$WORK_DIR"
+  [[ -n "$WORK_DIR" ]] && rm -rf "$WORK_DIR" >/dev/null 2>&1
 }
 
 preflight() {
@@ -358,7 +361,7 @@ install_extension_package() {
     [[ -f "$WEBROOT/extension/mcp/system/library/mcp/bootstrap.php" && -f "$WEBROOT/extension/mcp/catalog/controller/server.php" ]] \
       || fatal "mcp.package_install_failed" "$CURRENT_PHASE" "OC4 MCP files were not copied to expected locations." "Inspect OC4 package layout and copy step." "test expected OC4 files"
   fi
-  chmod -R a+rwX "$WEBROOT"
+  docker exec "$WEB_CONTAINER" sh -c 'chmod -R a+rwX /var/www/html/system/library/mcp /var/www/html/catalog/controller/extension/mcp /var/www/html/admin/controller/extension/module /var/www/html/admin/model/extension/module /var/www/html/admin/language/en-gb/extension/module /var/www/html/admin/view/template/extension/module /var/www/html/extension/mcp 2>/dev/null || true' >/dev/null 2>&1
   append_summary "- MCP extension files installed deterministically."
 }
 
@@ -579,6 +582,22 @@ http_get_json() {
   jq empty "$out" >/dev/null 2>"$out.jq.err" || fatal "$code" "$phase" "$message Response was not valid JSON." "$focus" "jq empty $out"
 }
 
+assert_cors_preflight() {
+  local out="$RESP_DIR/cors-options.json"
+  local headers="$RESP_DIR/cors-options.headers"
+  HTTP_STATUS="$(curl -sS -D "$headers" -o "$out" -w '%{http_code}' -X OPTIONS "$ENDPOINT_URL" 2>"$out.curl.err" || true)"
+  RESPONSE_FILE="$out"
+  if [[ ! "$HTTP_STATUS" =~ ^2 ]]; then
+    fatal "mcp.cors_failed" "$CURRENT_PHASE" "CORS preflight failed. HTTP status: $HTTP_STATUS." "Inspect catalog server OPTIONS handling." "curl -X OPTIONS $ENDPOINT_URL"
+  fi
+  grep -qi '^Access-Control-Allow-Origin:' "$headers" \
+    || fatal "mcp.cors_failed" "$CURRENT_PHASE" "CORS preflight missing Access-Control-Allow-Origin." "Inspect catalog server OPTIONS headers." "grep Access-Control-Allow-Origin $headers"
+  grep -qi '^Access-Control-Allow-Methods:.*POST' "$headers" \
+    || fatal "mcp.cors_failed" "$CURRENT_PHASE" "CORS preflight missing POST in Access-Control-Allow-Methods." "Inspect catalog server OPTIONS headers." "grep Access-Control-Allow-Methods $headers"
+  grep -qi '^Access-Control-Allow-Headers:.*Authorization' "$headers" \
+    || fatal "mcp.cors_failed" "$CURRENT_PHASE" "CORS preflight missing Authorization in Access-Control-Allow-Headers." "Inspect catalog server OPTIONS headers." "grep Access-Control-Allow-Headers $headers"
+}
+
 post_json() {
   local url="$1"
   local payload="$2"
@@ -616,6 +635,7 @@ run_mcp_tests() {
   log "Running MCP health/auth/protocol tests"
   http_get_json "$HEALTH_URL" "$RESP_DIR/health.json" "mcp.health_failed" "$CURRENT_PHASE" "MCP health endpoint failed." "Check route registration, module_mcp_status, and extension file placement."
   assert_json "$RESP_DIR/health.json" '.enabled == true and .server == "OpenCart MCP Server"' "mcp.health_failed" "$CURRENT_PHASE" "MCP health response was not enabled." "Check setup helper settings writes."
+  assert_cors_preflight
 
   CURRENT_PHASE="mcp.auth"
   local ping='{"jsonrpc":"2.0","id":10,"method":"ping","params":{}}'

@@ -57,7 +57,7 @@ class ControllerExtensionModuleMcp extends Controller {
         $this->load->model('extension/module/mcp');
         require_once DIR_SYSTEM . 'library/mcp/bootstrap.php';
 
-        if ($this->validate()) {
+        if (($this->request->server['REQUEST_METHOD'] ?? 'GET') === 'POST' && $this->validate()) {
             try {
                 $result = $this->model_extension_module_mcp->createClient(array(
                 'name' => $this->request->post['name'] ?? 'MCP Client',

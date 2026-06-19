@@ -110,7 +110,7 @@ class Util {
     }
 
     public static function clientIp($server) {
-        $keys = array('HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR');
+        $keys = array('REMOTE_ADDR');
         foreach ($keys as $key) {
             if (!empty($server[$key])) {
                 $ip = trim(explode(',', $server[$key])[0]);
@@ -215,4 +215,3 @@ class Util {
         return false;
     }
 }
-

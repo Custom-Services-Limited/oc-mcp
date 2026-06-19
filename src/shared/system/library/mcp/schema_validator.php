@@ -98,7 +98,7 @@ class SchemaValidator {
             case 'object':
                 return is_array($value);
             case 'array':
-                return is_array($value) && array_keys($value) === range(0, count($value) - 1);
+                return is_array($value) && ($value === array() || array_keys($value) === range(0, count($value) - 1));
             case 'string':
                 return is_string($value);
             case 'integer':
@@ -114,4 +114,3 @@ class SchemaValidator {
         }
     }
 }
-
