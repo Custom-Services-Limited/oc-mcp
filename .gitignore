@@ -3,6 +3,7 @@ internal_*.*
 .playwright/
 DS_Store
 dist/
+artifacts/
 node_modules/
 build/
 coverage/

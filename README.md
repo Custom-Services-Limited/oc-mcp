@@ -114,3 +114,25 @@ Tokens in query strings are rejected.
 - Mutating admin tools require dry-run first, then a confirmation token, idempotency key, and reason.
 - Audit logs should be reviewed regularly, especially alert rows and denied requests.
 
+## End-to-End Testing
+
+Run deterministic live OpenCart checks with Docker:
+
+```bash
+tools/e2e/opencart3.sh
+tools/e2e/opencart4.sh
+```
+
+The scripts build this extension, install OpenCart with its CLI installer, copy the MCP package into the correct extension location, enable MCP, create a catalog-read client, and call the live MCP health, auth, `initialize`, `tools/list`, and `tools/call` endpoints.
+
+Useful overrides:
+
+```bash
+OC_VERSION=3.0.5.0 tools/e2e/opencart3.sh
+OC_DOWNLOAD_URL=https://example.test/opencart.zip tools/e2e/opencart4.sh
+OC_HTTP_PORT=8080 tools/e2e/opencart3.sh
+E2E_ARTIFACT_DIR=/tmp/oc-mcp-artifacts tools/e2e/opencart4.sh
+KEEP_E2E=1 tools/e2e/opencart3.sh
+```
+
+Failure details are written under `artifacts/e2e/`, including `failure.json`, `summary.md`, HTTP responses, Docker logs, OpenCart logs, and recent MCP audit rows.

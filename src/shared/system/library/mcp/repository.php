@@ -328,6 +328,8 @@ class Repository {
             `output_summary` = '" . $this->escape($data['output_summary'] ?? '') . "',
             `error_code` = '" . $this->escape($data['error_code'] ?? '') . "',
             `duration_ms` = '" . (int)($data['duration_ms'] ?? 0) . "',
+            `reviewed` = 0,
+            `admin_note` = '',
             `created_at` = NOW()");
 
         $auditId = $this->lastId();
