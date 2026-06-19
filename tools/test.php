@@ -49,6 +49,23 @@ foreach (array_merge(php_files($root . '/src'), php_files($root . '/tools')) as 
 
 require_once $root . '/src/shared/system/library/mcp/bootstrap.php';
 
+function next_version_case($php, $root, $latest) {
+    $output = array();
+    $code = 0;
+    exec(escapeshellarg($php) . ' ' . escapeshellarg($root . '/tools/next-version.php') . ' --latest=' . escapeshellarg($latest), $output, $code);
+    assert_true($code === 0, 'next-version should accept latest=' . $latest);
+    return trim(implode("\n", $output));
+}
+
+assert_true(next_version_case($php, $root, 'none') === '1.0.0', 'next release without tags should be 1.0.0');
+assert_true(next_version_case($php, $root, '1.0.0') === '1.1.0', 'next release after 1.0.0 should be 1.1.0');
+assert_true(next_version_case($php, $root, '1.9.0') === '2.0.0', 'next release after 1.9.0 should be 2.0.0');
+
+$invalidOutput = array();
+$invalidCode = 0;
+exec(escapeshellarg($php) . ' ' . escapeshellarg($root . '/tools/next-version.php') . ' --latest=' . escapeshellarg('1.x.0') . ' 2>/dev/null', $invalidOutput, $invalidCode);
+assert_true($invalidCode !== 0, 'next-version should reject invalid semver');
+
 $tokenService = new \OpenCartMcp\TokenService('test-secret');
 $token = $tokenService->generateToken();
 $hash = $tokenService->hashToken($token);
