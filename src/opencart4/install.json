@@ -1,0 +1,8 @@
+{
+  "name": "OpenCart MCP Server",
+  "description": "Controlled, audited Model Context Protocol server for OpenCart.",
+  "code": "mcp",
+  "version": "0.1.0",
+  "author": "Custom Services Limited",
+  "link": "https://github.com/Custom-Services-Limited/oc-mcp/"
+}

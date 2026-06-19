@@ -1,0 +1,15 @@
+{
+  "name": "custom-services-limited/oc-mcp",
+  "description": "OpenCart MCP Server extension for controlled, audited AI automation.",
+  "type": "opencart-extension",
+  "license": "GPL-3.0-or-later",
+  "homepage": "https://github.com/Custom-Services-Limited/oc-mcp/",
+  "require": {
+    "php": ">=7.4"
+  },
+  "scripts": {
+    "test": "php tools/test.php",
+    "build": "php tools/build.php --version=0.1.0"
+  }
+}
+

@@ -1,0 +1,58 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  php:
+    name: PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.4', '8.0', '8.1', '8.2', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: json, mbstring, zip
+          coverage: none
+      - name: Validate composer metadata
+        run: composer validate --strict --no-check-publish
+      - name: Run tests
+        run: php tools/test.php
+      - name: Build installable packages
+        run: php tools/build.php --version=0.0.0-ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oc-mcp-packages-php-${{ matrix.php }}
+          path: dist/*.ocmod.zip
+
+  opencart-e2e:
+    name: OpenCart ${{ matrix.opencart }} E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - opencart: '3.x'
+            script: tools/e2e/opencart3.sh
+          - opencart: '4.x'
+            script: tools/e2e/opencart4.sh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: json, mbstring, zip
+          coverage: none
+      - name: Run OpenCart MCP E2E
+        run: ${{ matrix.script }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: oc-mcp-${{ matrix.opencart }}-e2e-artifacts
+          path: artifacts/e2e/**
